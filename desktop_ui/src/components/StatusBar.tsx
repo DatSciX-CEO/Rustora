@@ -6,10 +6,18 @@ interface StatusBarProps {
   offset: number;
   pageSize: number;
   datasetName: string | null;
+  sizeBytes: number | null;
   persistent: boolean;
   projectPath: string | null;
   error: string | null;
   loading: boolean;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
 export function StatusBar({
@@ -18,6 +26,7 @@ export function StatusBar({
   offset,
   pageSize,
   datasetName,
+  sizeBytes,
   persistent,
   projectPath,
   error,
@@ -67,6 +76,14 @@ export function StatusBar({
             <span className="status-item">
               Columns: <strong>{totalColumns}</strong>
             </span>
+            {sizeBytes != null && sizeBytes > 0 && (
+              <>
+                <span className="status-sep">|</span>
+                <span className="status-item">
+                  Size: <strong>{formatBytes(sizeBytes)}</strong>
+                </span>
+              </>
+            )}
             {totalRows > 0 && (
               <>
                 <span className="status-sep">|</span>

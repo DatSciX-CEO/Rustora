@@ -3,5 +3,10 @@ name = "python_api"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "rustora"
+crate-type = ["cdylib"]
+
 [dependencies]
 core_engine = { path = "../core_engine" }
+pyo3 = { version = "0.24", features = ["extension-module", "abi3-py39"] }

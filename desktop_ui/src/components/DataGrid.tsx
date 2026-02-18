@@ -1,7 +1,11 @@
-import { useRef, useCallback, useEffect } from "react";
+import { useRef, useCallback, useEffect, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { ParsedTable } from "../lib/arrow";
 import type { ColumnInfo } from "../hooks/useDataset";
+import {
+  FilterPopover,
+  type FilterCondition,
+} from "./FilterPopover";
 
 interface DataGridProps {
   page: ParsedTable | null;
@@ -13,6 +17,13 @@ interface DataGridProps {
   sortDesc: boolean;
   onSort: (column: string) => void;
   onPageChange: (offset: number) => void;
+  onFilterStructured?: (
+    conditions: FilterCondition[],
+    logic: string
+  ) => void;
+  onNewProject?: () => void;
+  onOpenProject?: () => void;
+  onOpenFile?: () => void;
   loading: boolean;
 }
 
@@ -67,10 +78,20 @@ export function DataGrid({
   sortDesc,
   onSort,
   onPageChange,
+  onFilterStructured,
+  onNewProject,
+  onOpenProject,
+  onOpenFile,
   loading,
 }: DataGridProps) {
   const parentRef = useRef<HTMLDivElement>(null);
   const rows = page?.rows ?? [];
+
+  const [filterCol, setFilterCol] = useState<{
+    name: string;
+    dtype: string;
+    rect: DOMRect;
+  } | null>(null);
 
   const rowVirtualizer = useVirtualizer({
     count: rows.length,
@@ -118,7 +139,7 @@ export function DataGrid({
             High-performance data analysis, 100% on your machine
           </p>
           <div className="welcome-actions">
-            <div className="welcome-card">
+            <button className="welcome-card" onClick={onNewProject} type="button">
               <div className="welcome-card-icon">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M12 5v14M5 12h14" />
@@ -128,8 +149,8 @@ export function DataGrid({
                 <strong>New Project</strong>
                 <span>Create a .duckdb project for persistent storage</span>
               </div>
-            </div>
-            <div className="welcome-card">
+            </button>
+            <button className="welcome-card" onClick={onOpenProject} type="button">
               <div className="welcome-card-icon">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <ellipse cx="12" cy="5" rx="9" ry="3" />
@@ -141,8 +162,8 @@ export function DataGrid({
                 <strong>Open Project</strong>
                 <span>Resume work on an existing .duckdb project</span>
               </div>
-            </div>
-            <div className="welcome-card">
+            </button>
+            <button className="welcome-card" onClick={onOpenFile} type="button">
               <div className="welcome-card-icon">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
@@ -154,10 +175,10 @@ export function DataGrid({
                 <strong>Open File</strong>
                 <span>Quick-analyze a CSV, Parquet, or Arrow file</span>
               </div>
-            </div>
+            </button>
           </div>
           <span className="grid-empty-hint">
-            Use the toolbar above to get started
+            Click a card above or use the toolbar to get started
           </span>
         </div>
       </div>
@@ -183,6 +204,21 @@ export function DataGrid({
               <span className="sort-indicator">
                 {sortDesc ? "\u25BC" : "\u25B2"}
               </span>
+            )}
+            {onFilterStructured && (
+              <button
+                className="header-filter-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                  setFilterCol({ name: col.name, dtype: col.dtype, rect });
+                }}
+                title={`Filter ${col.name}`}
+              >
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+                </svg>
+              </button>
             )}
           </div>
         ))}
@@ -240,6 +276,18 @@ export function DataGrid({
           </div>
         )}
       </div>
+
+      {filterCol && onFilterStructured && (
+        <FilterPopover
+          column={filterCol.name}
+          dtype={filterCol.dtype}
+          anchorRect={filterCol.rect}
+          onApply={(conditions, logic) =>
+            onFilterStructured(conditions, logic)
+          }
+          onClose={() => setFilterCol(null)}
+        />
+      )}
     </div>
   );
 }

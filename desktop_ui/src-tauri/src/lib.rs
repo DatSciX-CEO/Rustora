@@ -1,5 +1,5 @@
-use core_engine::RustoraSession;
-use serde::Serialize;
+use core_engine::{FilterCondition, FilterLogic, FilterOperator, FilterSpec, RustoraSession};
+use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use tauri::State;
 
@@ -22,6 +22,7 @@ struct OpenResult {
     columns: Vec<ColumnInfo>,
     total_rows: usize,
     persistent: bool,
+    size_bytes: Option<u64>,
 }
 
 /// Info about the current project.
@@ -56,6 +57,7 @@ fn make_open_result(session: &RustoraSession, name: &str) -> Result<OpenResult, 
         columns,
         total_rows,
         persistent: info.persistent,
+        size_bytes: info.estimated_size_bytes,
     })
 }
 
@@ -231,6 +233,69 @@ fn filter_dataset(
     make_open_result(&session, &new_name)
 }
 
+/// A single filter condition from the frontend.
+#[derive(Deserialize)]
+struct FilterConditionInput {
+    column: String,
+    operator: String,
+    value: String,
+}
+
+fn parse_operator(op: &str) -> Result<FilterOperator, String> {
+    match op {
+        "equals" => Ok(FilterOperator::Equals),
+        "not_equals" => Ok(FilterOperator::NotEquals),
+        "greater_than" => Ok(FilterOperator::GreaterThan),
+        "greater_than_or_equal" => Ok(FilterOperator::GreaterThanOrEqual),
+        "less_than" => Ok(FilterOperator::LessThan),
+        "less_than_or_equal" => Ok(FilterOperator::LessThanOrEqual),
+        "contains" => Ok(FilterOperator::Contains),
+        "not_contains" => Ok(FilterOperator::NotContains),
+        "starts_with" => Ok(FilterOperator::StartsWith),
+        "ends_with" => Ok(FilterOperator::EndsWith),
+        "is_null" => Ok(FilterOperator::IsNull),
+        "is_not_null" => Ok(FilterOperator::IsNotNull),
+        _ => Err(format!("Unknown filter operator: {}", op)),
+    }
+}
+
+/// Filter a dataset using structured conditions (safe from SQL injection).
+#[tauri::command]
+fn filter_dataset_structured(
+    state: State<'_, AppState>,
+    dataset_name: String,
+    conditions: Vec<FilterConditionInput>,
+    logic: String,
+) -> Result<OpenResult, String> {
+    let mut session = state.session.lock().map_err(|e| e.to_string())?;
+
+    let parsed_conditions: Vec<FilterCondition> = conditions
+        .into_iter()
+        .map(|c| {
+            Ok(FilterCondition {
+                column: c.column,
+                operator: parse_operator(&c.operator)?,
+                value: c.value,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+
+    let filter_logic = match logic.as_str() {
+        "or" => FilterLogic::Or,
+        _ => FilterLogic::And,
+    };
+
+    let spec = FilterSpec {
+        conditions: parsed_conditions,
+        logic: filter_logic,
+    };
+
+    let new_name = session
+        .filter_dataset_structured(&dataset_name, &spec)
+        .map_err(|e| e.to_string())?;
+    make_open_result(&session, &new_name)
+}
+
 /// Group a dataset by columns with aggregate expressions.
 #[tauri::command]
 fn group_by(
@@ -261,6 +326,28 @@ fn add_calculated_column(
         .add_calculated_column(&dataset_name, &expression, &alias)
         .map_err(|e| e.to_string())?;
     make_open_result(&session, &new_name)
+}
+
+/// Aggregate data for chart visualization. Returns Arrow IPC bytes.
+#[tauri::command]
+fn aggregate_for_chart(
+    state: State<'_, AppState>,
+    dataset_name: String,
+    group_col: String,
+    value_col: Option<String>,
+    agg_type: String,
+    limit: u32,
+) -> Result<Vec<u8>, String> {
+    let session = state.session.lock().map_err(|e| e.to_string())?;
+    session
+        .aggregate_for_chart(
+            &dataset_name,
+            &group_col,
+            value_col.as_deref(),
+            &agg_type,
+            limit,
+        )
+        .map_err(|e| e.to_string())
 }
 
 /// Get summary statistics for a dataset as Arrow IPC bytes.
@@ -300,8 +387,10 @@ pub fn run() {
             list_datasets,
             remove_dataset,
             filter_dataset,
+            filter_dataset_structured,
             group_by,
             add_calculated_column,
+            aggregate_for_chart,
             get_summary_stats,
         ])
         .run(tauri::generate_context!())

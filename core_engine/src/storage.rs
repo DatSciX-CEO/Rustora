@@ -201,6 +201,38 @@ impl DuckStorage {
         })
     }
 
+    /// Estimate the in-memory size of a table in bytes based on column types and row count.
+    pub fn table_estimated_size_bytes(&self, table_name: &str) -> Result<u64> {
+        let info = self.table_info(table_name)?;
+        let row_count = info.row_count as u64;
+        if row_count == 0 {
+            return Ok(0);
+        }
+
+        let bytes_per_row: u64 = info
+            .column_types
+            .iter()
+            .map(|t| {
+                let upper = t.to_uppercase();
+                if upper.contains("BIGINT") || upper.contains("DOUBLE") || upper.contains("TIMESTAMP") {
+                    8
+                } else if upper.contains("INTEGER") || upper.contains("FLOAT") {
+                    4
+                } else if upper.contains("SMALLINT") {
+                    2
+                } else if upper.contains("BOOLEAN") || upper.contains("TINYINT") {
+                    1
+                } else if upper.contains("VARCHAR") || upper.contains("TEXT") || upper.contains("BLOB") {
+                    64
+                } else {
+                    32
+                }
+            })
+            .sum();
+
+        Ok(row_count * bytes_per_row)
+    }
+
     /// Get the row count for a table.
     pub fn table_row_count(&self, table_name: &str) -> Result<usize> {
         let sql = format!("SELECT COUNT(*) FROM \"{}\"", table_name);

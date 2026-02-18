@@ -5,6 +5,10 @@ description = "Rustora - High-performance data analysis tool"
 authors = ["you"]
 edition = "2021"
 
+[[bin]]
+name = "Rustora"
+path = "src/main.rs"
+
 [lib]
 name = "desktop_ui_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]

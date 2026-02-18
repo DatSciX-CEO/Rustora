@@ -1,0 +1,15 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "rustora"
+version = "0.1.0"
+description = "Blazingly fast, 100% local data analysis - Python API"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+keywords = ["data", "analysis", "duckdb", "polars", "arrow"]
+
+[tool.maturin]
+features = ["pyo3/extension-module", "pyo3/abi3-py39"]
+manifest-path = "Cargo.toml"

@@ -174,6 +174,24 @@ npm install
 npm run tauri dev
 ```
 
+### Build for Release
+
+To create the optimized `Rustora.exe` executable:
+
+```bash
+# Make sure you are in the desktop_ui directory
+cd desktop_ui
+
+# Build the release binary
+npm run tauri build
+```
+
+The build process will produce:
+- **Executable:** `../target/release/Rustora.exe`
+- **Installer (MSI):** `../target/release/bundle/msi/`
+
+> **Note:** The `target` directory is excluded from version control (git-ignored). When cloning this repository on a new machine, you **must run the build command** to generate the executable.
+
 ### Run Tests
 
 ```bash

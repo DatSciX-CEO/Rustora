@@ -1,4 +1,5 @@
 use crate::error::{Result, RustoraError};
+use crate::filter::FilterSpec;
 use crate::storage::DuckStorage;
 use polars::prelude::*;
 use std::collections::HashMap;
@@ -17,6 +18,8 @@ pub struct DatasetInfo {
     pub column_dtypes: Vec<String>,
     /// Whether this dataset is a persistent DuckDB table or a transient Polars LazyFrame.
     pub persistent: bool,
+    /// Estimated in-memory size in bytes (None if unknown).
+    pub estimated_size_bytes: Option<u64>,
 }
 
 /// The core session that manages all data operations.
@@ -166,6 +169,7 @@ impl RustoraSession {
     pub fn dataset_info(&self, name: &str) -> Result<DatasetInfo> {
         if let Some(storage) = &self.storage {
             if let Ok(info) = storage.table_info(name) {
+                let size = storage.table_estimated_size_bytes(name).ok();
                 return Ok(DatasetInfo {
                     name: info.name,
                     path: String::new(),
@@ -174,6 +178,7 @@ impl RustoraSession {
                     column_names: info.column_names,
                     column_dtypes: info.column_types,
                     persistent: true,
+                    estimated_size_bytes: size,
                 });
             }
         }
@@ -194,6 +199,7 @@ impl RustoraSession {
                 column_names,
                 column_dtypes,
                 persistent: false,
+                estimated_size_bytes: None,
             });
         }
 
@@ -362,6 +368,16 @@ impl RustoraSession {
         )))
     }
 
+    /// Filter a dataset using a structured FilterSpec (safe from SQL injection).
+    pub fn filter_dataset_structured(
+        &mut self,
+        name: &str,
+        spec: &FilterSpec,
+    ) -> Result<String> {
+        let where_clause = spec.to_sql_where()?;
+        self.filter_dataset_sql(name, &where_clause)
+    }
+
     /// Group a dataset by columns with aggregations.
     /// `agg_exprs` are SQL aggregate expressions like ["AVG(salary)", "COUNT(*)", "SUM(amount)"].
     pub fn group_by(
@@ -431,6 +447,53 @@ impl RustoraSession {
         Err(RustoraError::Session(
             "Summary statistics require an active project. Please create or open a project first.".to_string()
         ))
+    }
+
+    // -----------------------------------------------------------------------
+    // Chart / Aggregation
+    // -----------------------------------------------------------------------
+
+    /// Aggregate data for chart visualization.
+    /// Returns up to `limit` groups, sorted by the group column.
+    /// `agg_type` can be: "count", "sum", "avg", "min", "max"
+    pub fn aggregate_for_chart(
+        &self,
+        name: &str,
+        group_col: &str,
+        value_col: Option<&str>,
+        agg_type: &str,
+        limit: u32,
+    ) -> Result<Vec<u8>> {
+        let storage = self.storage.as_ref().ok_or(RustoraError::NoProjectOpen)?;
+
+        if !storage.list_tables()?.contains(&name.to_string()) {
+            return Err(RustoraError::TableNotFound(name.to_string()));
+        }
+
+        let agg_expr = match (agg_type, value_col) {
+            ("count", _) => "COUNT(*)".to_string(),
+            (agg, Some(vc)) => format!("{}(\"{}\")", agg.to_uppercase(), vc),
+            (agg, None) => {
+                return Err(RustoraError::Session(format!(
+                    "Aggregation '{}' requires a value column",
+                    agg
+                )))
+            }
+        };
+
+        let sql = format!(
+            "SELECT \"{group}\" AS label, {agg} AS value \
+             FROM \"{table}\" \
+             GROUP BY \"{group}\" \
+             ORDER BY value DESC \
+             LIMIT {limit}",
+            group = group_col,
+            agg = agg_expr,
+            table = name,
+            limit = limit,
+        );
+
+        storage.query_to_ipc(&sql)
     }
 
     // -----------------------------------------------------------------------

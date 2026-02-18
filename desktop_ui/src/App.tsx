@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import { useDataset } from "./hooks/useDataset";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { MenuBar } from "./components/MenuBar";
@@ -6,7 +7,15 @@ import { SqlPanel } from "./components/SqlPanel";
 import { DataGrid } from "./components/DataGrid";
 import { StatusBar } from "./components/StatusBar";
 import { TableList } from "./components/TableList";
+import { ChartPanel } from "./components/ChartPanel";
 import "./App.css";
+
+const DATA_FILTERS = [
+  { name: "Data Files", extensions: ["csv", "tsv", "parquet", "pq", "ipc", "arrow", "feather"] },
+  { name: "CSV", extensions: ["csv", "tsv"] },
+  { name: "Parquet", extensions: ["parquet", "pq"] },
+  { name: "Arrow IPC", extensions: ["ipc", "arrow", "feather"] },
+];
 
 function App() {
   const {
@@ -22,13 +31,47 @@ function App() {
     exportDataset,
     removeDataset,
     filterDataset,
+    filterDatasetStructured,
     groupByDataset,
     addCalculatedColumn,
     getSummaryStats,
   } = useDataset();
   const [sqlVisible, setSqlVisible] = useState(false);
+  const [chartVisible, setChartVisible] = useState(false);
 
   const showSidebar = state.tables.length > 0;
+
+  const handleWelcomeNewProject = useCallback(async () => {
+    const result = await save({
+      filters: [{ name: "Rustora Project", extensions: ["duckdb"] }],
+      title: "Create New Rustora Project",
+    });
+    if (result) newProject(result);
+  }, [newProject]);
+
+  const handleWelcomeOpenProject = useCallback(async () => {
+    const result = await open({
+      multiple: false,
+      filters: [{ name: "Rustora Project", extensions: ["duckdb"] }],
+      title: "Open Rustora Project",
+    });
+    if (result) openProject(result);
+  }, [openProject]);
+
+  const handleWelcomeOpenFile = useCallback(async () => {
+    const result = await open({
+      multiple: false,
+      filters: DATA_FILTERS,
+      title: "Open Data File",
+    });
+    if (result) {
+      if (state.project) {
+        importFile(result);
+      } else {
+        openFile(result);
+      }
+    }
+  }, [openFile, importFile, state.project]);
 
   return (
     <ErrorBoundary>
@@ -40,6 +83,7 @@ function App() {
           onOpenFile={openFile}
           onExport={exportDataset}
           onToggleSql={() => setSqlVisible(!sqlVisible)}
+          onToggleChart={() => setChartVisible(!chartVisible)}
           onFilter={filterDataset}
           onGroupBy={groupByDataset}
           onAddColumn={addCalculatedColumn}
@@ -73,15 +117,27 @@ function App() {
             sortDesc={state.sortDesc}
             onSort={sortBy}
             onPageChange={loadPage}
+            onFilterStructured={filterDatasetStructured}
+            onNewProject={handleWelcomeNewProject}
+            onOpenProject={handleWelcomeOpenProject}
+            onOpenFile={handleWelcomeOpenFile}
             loading={state.loading}
           />
         </div>
+        {chartVisible && state.name && (
+          <ChartPanel
+            datasetName={state.name}
+            columns={state.columns}
+            onClose={() => setChartVisible(false)}
+          />
+        )}
         <StatusBar
           totalRows={state.totalRows}
           totalColumns={state.columns.length}
           offset={state.offset}
           pageSize={state.pageSize}
           datasetName={state.name}
+          sizeBytes={state.sizeBytes}
           persistent={state.persistent}
           projectPath={state.project?.path ?? null}
           error={state.error}

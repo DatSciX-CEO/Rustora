@@ -16,6 +16,7 @@ export interface DatasetState {
   name: string | null;
   columns: ColumnInfo[];
   totalRows: number;
+  sizeBytes: number | null;
   currentPage: ParsedTable | null;
   offset: number;
   pageSize: number;
@@ -35,6 +36,7 @@ export function useDataset() {
     name: null,
     columns: [],
     totalRows: 0,
+    sizeBytes: null,
     currentPage: null,
     offset: 0,
     pageSize: PAGE_SIZE,
@@ -136,6 +138,7 @@ export function useDataset() {
       columns: ColumnInfo[];
       total_rows: number;
       persistent: boolean;
+      size_bytes?: number | null;
     }) => {
       activeDataset.current = result.dataset_name;
       const page = await fetchChunk(result.dataset_name, 0, PAGE_SIZE);
@@ -146,6 +149,7 @@ export function useDataset() {
         name: result.dataset_name,
         columns: result.columns,
         totalRows: result.total_rows,
+        sizeBytes: result.size_bytes ?? null,
         currentPage: page,
         offset: 0,
         pageSize: PAGE_SIZE,
@@ -168,6 +172,7 @@ export function useDataset() {
           columns: ColumnInfo[];
           total_rows: number;
           persistent: boolean;
+          size_bytes: number | null;
         }>("open_file", { path });
         await applyOpenResult(result);
       } catch (e) {
@@ -186,6 +191,7 @@ export function useDataset() {
           columns: ColumnInfo[];
           total_rows: number;
           persistent: boolean;
+          size_bytes: number | null;
         }>("import_file", { path, tableName: tableName ?? null });
         await applyOpenResult(result);
       } catch (e) {
@@ -273,6 +279,7 @@ export function useDataset() {
           columns: ColumnInfo[];
           total_rows: number;
           persistent: boolean;
+          size_bytes: number | null;
         }>("sort_dataset", {
           datasetName: activeDataset.current,
           columns: [column],
@@ -296,6 +303,7 @@ export function useDataset() {
           columns: ColumnInfo[];
           total_rows: number;
           persistent: boolean;
+          size_bytes: number | null;
         }>("execute_sql", { sql });
         await applyOpenResult(result);
       } catch (e) {
@@ -355,9 +363,41 @@ export function useDataset() {
           columns: ColumnInfo[];
           total_rows: number;
           persistent: boolean;
+          size_bytes: number | null;
         }>("filter_dataset", {
           datasetName: activeDataset.current,
           whereClause,
+        });
+        await applyOpenResult(result);
+      } catch (e) {
+        setState((s) => ({ ...s, loading: false, error: String(e) }));
+      }
+    },
+    [applyOpenResult]
+  );
+
+  const filterDatasetStructured = useCallback(
+    async (
+      conditions: {
+        column: string;
+        operator: string;
+        value: string;
+      }[],
+      logic: string = "and"
+    ) => {
+      if (!activeDataset.current) return;
+      setState((s) => ({ ...s, loading: true, error: null }));
+      try {
+        const result = await invoke<{
+          dataset_name: string;
+          columns: ColumnInfo[];
+          total_rows: number;
+          persistent: boolean;
+          size_bytes: number | null;
+        }>("filter_dataset_structured", {
+          datasetName: activeDataset.current,
+          conditions,
+          logic,
         });
         await applyOpenResult(result);
       } catch (e) {
@@ -377,6 +417,7 @@ export function useDataset() {
           columns: ColumnInfo[];
           total_rows: number;
           persistent: boolean;
+          size_bytes: number | null;
         }>("group_by", {
           datasetName: activeDataset.current,
           groupColumns,
@@ -400,6 +441,7 @@ export function useDataset() {
           columns: ColumnInfo[];
           total_rows: number;
           persistent: boolean;
+          size_bytes: number | null;
         }>("add_calculated_column", {
           datasetName: activeDataset.current,
           expression,
@@ -439,6 +481,7 @@ export function useDataset() {
     exportDataset,
     removeDataset,
     filterDataset,
+    filterDatasetStructured,
     groupByDataset,
     addCalculatedColumn,
     getSummaryStats,
