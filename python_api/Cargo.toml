@@ -1,0 +1,7 @@
+[package]
+name = "python_api"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+core_engine = { path = "../core_engine" }

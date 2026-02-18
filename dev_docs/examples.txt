@@ -1,0 +1,80 @@
+Here is a highly optimized, strictly-defined prompt designed exactly for an AI coding agent (like Cursor, Claude, ChatGPT, or Devin).
+
+AI coding agents perform exceptionally well when you give them **strict constraints**, a **rigid folder structure**, and **forbid them from doing too much at once**. If you just ask an AI to "build the app," it will try to write 40 files across Rust, TypeScript, and Python simultaneously, run out of context limits, and give you broken, intertwined code.
+
+This prompt forces the AI to build the perfect, modular, decoupled foundation first.
+
+---
+
+### 📋 Copy and Paste the text below to your AI Agent:
+
+```markdown
+# Context & Persona
+You are an Elite Systems Architect and Principal Rust Developer. We are building a new data analysis, engineering, and exploratory desktop application named **Rustora**. 
+
+Rustora is designed to be a high-performance, highly modular alternative to tools like Excel, Power Query, Power BI, and SSMS. It must process massive datasets (10GB-50GB+) on standard consumer hardware blazingly fast by utilizing out-of-core processing, lazy evaluation, and multi-threading.
+
+# Core Directives & Strict Constraints (NON-NEGOTIABLE)
+1. **100% Local Execution Only:** Rustora is entirely air-gapped. Absolutely NO external cloud APIs, NO telemetry, NO web-dependent services, and NO remote data processing. Everything runs strictly on the local CPU/GPU.
+2. **Simple, Modular, but Powerful:** The codebase must be clean and highly modular. We will use a standard Rust Cargo Workspace. The core data engine must be entirely decoupled from the UI or Python wrappers so other local applications can import our core crates later.
+3. **Memory Mastery (Zero-Copy):** Rust is the sole owner of memory. You will use **Apache Arrow** as the standard in-memory format. 
+4. **The JSON Ban (Critical):** NEVER serialize tabular datasets to JSON to pass them to the UI or Python. You must use Arrow IPC (Inter-Process Communication) raw binary bytes (`Vec<u8>`) to pass data to the frontend to maintain zero-latency UI rendering.
+5. **Out-of-Core Processing:** Always default to Polars `LazyFrame` and chunked streaming. Never load massive files entirely into RAM at once.
+
+# Target Architecture & Folder Structure
+We will use a standard Cargo Workspace. Initialize the project with this exact, simple-yet-effective monorepo structure:
+
+```text
+rustora/
+├── Cargo.toml                  # Workspace root (members = ["core_engine", "desktop_ui", "python_api"])
+├── core_engine/                # LAYER 1: THE BRAIN (100% Pure Rust Data Engine)
+│   ├── Cargo.toml              # Dependencies: polars (lazy, parquet, ipc), arrow, anyhow
+│   └── src/
+│       ├── lib.rs              # Public API for the engine
+│       └── session.rs          # File I/O, LazyFrame state, and Arrow IPC serialization
+├── desktop_ui/                 # LAYER 2: THE GUI (Tauri v2 App)
+│   ├── src-tauri/              # Rust backend (imports `core_engine` as a dependency)
+│   └── src/                    # Web Frontend (Svelte/TypeScript or React)
+└── python_api/                 # LAYER 3: THE BRIDGE (Python Extensibility - Leave empty for now)
+    └── Cargo.toml              # For PyO3/Maturin bindings later
+
+```
+
+# Phase 1: Immediate Execution Steps
+
+Do not attempt to build the entire application, the Tauri UI, or the Python bindings yet. If you try to build everything at once, the code will be messy and prone to errors. Your immediate task is to scaffold the workspace and prove the pure Rust `core_engine` works.
+
+Execute these steps exactly:
+
+**Step 1: Workspace Initialization**
+Create the root `rustora` folder and the root `Cargo.toml` defining the workspace members.
+
+**Step 2: Build the Core Engine (`core_engine`)**
+
+1. Initialize `core_engine` as a Rust library crate.
+2. Add dependencies: `polars` (with features: `lazy`, `parquet`, `csv`, `ipc`), `arrow`, and `anyhow`.
+3. Inside `session.rs`, implement a `RustoraSession` struct to hold application state.
+4. Write a function `scan_file(path: &str)` that takes a local file path (CSV or Parquet) and returns a Polars `LazyFrame` (do NOT eagerly collect it into RAM).
+5. Write a function `get_preview_ipc(lf: LazyFrame, limit: usize)` that collects a limited chunk of the lazy query (e.g., the first 100 rows) and serializes it strictly into raw **Arrow IPC Bytes** (`Vec<u8>`).
+
+**Step 3: Write a Core Test**
+Write a standard Rust unit test in `core_engine` that creates a dummy CSV on the local filesystem, loads it lazily via `RustoraSession::scan_file()`, and successfully outputs the Arrow IPC bytes using `get_preview_ipc()`.
+
+# Output Instructions
+
+Think step-by-step. Provide the exact terminal commands to create the folders, followed by the complete code for the root `Cargo.toml`, the `core_engine/Cargo.toml`, and the `core_engine/src/` files (including the test).
+
+**Stop and wait for my review and approval before moving on to Phase 2 (setting up the Tauri app).**
+
+```
+
+***
+
+### 💡 Pro-Tips for Managing the AI with this Prompt:
+
+1. **The "JSON Ban" is the secret weapon:** AI agents almost *always* default to standard `serde_json` APIs when connecting Rust to Web UIs because it is easy. However, if your app tries to serialize 100,000 rows of data into JSON, the UI will freeze and crash. By explicitly forbidding JSON and demanding **Arrow IPC bytes**, you guarantee your app will actually perform like a native C++ application.
+2. **It enforces the Local-Only rule:** AI tools love to pull in analytics trackers, assume you want a cloud database, or try to use external CDNs for UI libraries. Directive #1 stops that immediately.
+3. **How to proceed to Phase 2:** Once the AI finishes generating the code above, run `cargo test` in your terminal. If it passes, simply reply to the AI with: 
+   *"Perfect, the core engine test passed. Let's move to Phase 2: Scaffold the Tauri v2 application inside `desktop_ui`. Create a Tauri command in `src-tauri` that calls our `get_preview_ipc` function from `core_engine` and returns the `Vec<u8>` to the frontend."*
+
+```
