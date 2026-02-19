@@ -50,6 +50,7 @@ export function useDataset() {
   });
 
   const activeDataset = useRef<string | null>(null);
+  const pageRequestId = useRef(0);
 
   const fetchChunk = useCallback(
     async (datasetName: string, offset: number, limit: number) => {
@@ -246,6 +247,7 @@ export function useDataset() {
   const loadPage = useCallback(
     async (offset: number) => {
       if (!activeDataset.current) return;
+      const requestId = ++pageRequestId.current;
       setState((s) => ({ ...s, loading: true }));
       try {
         const page = await fetchChunk(
@@ -253,6 +255,7 @@ export function useDataset() {
           offset,
           PAGE_SIZE
         );
+        if (requestId !== pageRequestId.current) return;
         setState((s) => ({
           ...s,
           currentPage: page,
@@ -260,6 +263,7 @@ export function useDataset() {
           loading: false,
         }));
       } catch (e) {
+        if (requestId !== pageRequestId.current) return;
         setState((s) => ({ ...s, loading: false, error: String(e) }));
       }
     },

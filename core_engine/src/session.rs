@@ -501,6 +501,7 @@ impl RustoraSession {
     // -----------------------------------------------------------------------
 
     /// Export a dataset to Parquet.
+    /// For transient LazyFrames, uses streaming sink to avoid loading the full dataset into memory.
     pub fn export_to_parquet(&self, name: &str, output_path: &str) -> Result<()> {
         if let Some(storage) = &self.storage {
             if storage.list_tables()?.contains(&name.to_string()) {
@@ -509,9 +510,8 @@ impl RustoraSession {
         }
 
         if let Some(lf) = self.transient.get(name) {
-            let mut df = lf.clone().collect()?;
-            let file = std::fs::File::create(output_path)?;
-            ParquetWriter::new(file).finish(&mut df)?;
+            lf.clone()
+                .sink_parquet(&output_path, ParquetWriteOptions::default(), None)?;
             return Ok(());
         }
 
@@ -519,6 +519,7 @@ impl RustoraSession {
     }
 
     /// Export a dataset to CSV.
+    /// For transient LazyFrames, uses streaming sink to avoid loading the full dataset into memory.
     pub fn export_to_csv(&self, name: &str, output_path: &str) -> Result<()> {
         if let Some(storage) = &self.storage {
             if storage.list_tables()?.contains(&name.to_string()) {
@@ -527,9 +528,14 @@ impl RustoraSession {
         }
 
         if let Some(lf) = self.transient.get(name) {
-            let mut df = lf.clone().collect()?;
-            let file = std::fs::File::create(output_path)?;
-            CsvWriter::new(file).finish(&mut df)?;
+            lf.clone().sink_csv(
+                &output_path,
+                CsvWriterOptions {
+                    include_header: true,
+                    ..Default::default()
+                },
+                None,
+            )?;
             return Ok(());
         }
 

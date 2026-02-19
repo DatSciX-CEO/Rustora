@@ -1,6 +1,5 @@
 use crate::error::{Result, RustoraError};
 use arrow_ipc::writer::StreamWriter;
-use duckdb::arrow::record_batch::RecordBatch;
 use duckdb::Connection;
 use std::path::Path;
 
@@ -25,6 +24,7 @@ impl DuckStorage {
     /// Open or create a persistent DuckDB database at the given path.
     pub fn open(db_path: &str) -> Result<Self> {
         let conn = Connection::open(db_path).map_err(|e| RustoraError::DuckDb(e.to_string()))?;
+        Self::configure_connection(&conn)?;
         Ok(Self {
             conn,
             db_path: db_path.to_string(),
@@ -35,10 +35,21 @@ impl DuckStorage {
     pub fn open_in_memory() -> Result<Self> {
         let conn =
             Connection::open_in_memory().map_err(|e| RustoraError::DuckDb(e.to_string()))?;
+        Self::configure_connection(&conn)?;
         Ok(Self {
             conn,
             db_path: ":memory:".to_string(),
         })
+    }
+
+    /// Tune the DuckDB connection for local desktop workloads.
+    fn configure_connection(conn: &Connection) -> Result<()> {
+        conn.execute_batch(
+            "SET enable_progress_bar = false;
+             SET preserve_insertion_order = true;",
+        )
+        .map_err(|e| RustoraError::DuckDb(e.to_string()))?;
+        Ok(())
     }
 
     pub fn db_path(&self) -> &str {
@@ -115,19 +126,37 @@ impl DuckStorage {
     // Query Execution -> Arrow IPC bytes (ZERO JSON)
     // -----------------------------------------------------------------------
 
-    /// Execute arbitrary SQL and return the result as Arrow IPC stream bytes.
+    /// Execute arbitrary SQL and stream the result directly as Arrow IPC bytes.
+    /// Batches are written incrementally to avoid collecting the full result set in memory.
     pub fn query_to_ipc(&self, sql: &str) -> Result<Vec<u8>> {
         let mut stmt = self
             .conn
             .prepare(sql)
             .map_err(|e| RustoraError::DuckDb(e.to_string()))?;
 
-        let batches: Vec<RecordBatch> = stmt
+        let arrow_iter = stmt
             .query_arrow([])
-            .map_err(|e| RustoraError::DuckDb(e.to_string()))?
-            .collect();
+            .map_err(|e| RustoraError::DuckDb(e.to_string()))?;
 
-        record_batches_to_ipc(&batches)
+        let schema = arrow_iter.get_schema();
+        let mut buffer: Vec<u8> = Vec::new();
+
+        let mut writer = StreamWriter::try_new(&mut buffer, &schema)
+            .map_err(|e| RustoraError::DuckDb(format!("Arrow IPC write error: {}", e)))?;
+
+        for batch in arrow_iter {
+            if batch.num_rows() > 0 {
+                writer
+                    .write(&batch)
+                    .map_err(|e| RustoraError::DuckDb(format!("Arrow IPC write error: {}", e)))?;
+            }
+        }
+
+        writer
+            .finish()
+            .map_err(|e| RustoraError::DuckDb(format!("Arrow IPC finish error: {}", e)))?;
+
+        Ok(buffer)
     }
 
     /// Get a paginated chunk of a table as Arrow IPC bytes.
@@ -165,8 +194,8 @@ impl DuckStorage {
         let names: Vec<String> = stmt
             .query_map([], |row| row.get(0))
             .map_err(|e| RustoraError::DuckDb(e.to_string()))?
-            .filter_map(|r| r.ok())
-            .collect();
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| RustoraError::DuckDb(e.to_string()))?;
 
         Ok(names)
     }
@@ -186,8 +215,8 @@ impl DuckStorage {
         let columns: Vec<(String, String)> = stmt
             .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
             .map_err(|e| RustoraError::DuckDb(e.to_string()))?
-            .filter_map(|r| r.ok())
-            .collect();
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| RustoraError::DuckDb(e.to_string()))?;
 
         let column_names: Vec<String> = columns.iter().map(|(n, _)| n.clone()).collect();
         let column_types: Vec<String> = columns.iter().map(|(_, t)| t.clone()).collect();
@@ -309,33 +338,6 @@ fn sanitize_table_name(name: &str) -> String {
         .collect()
 }
 
-/// Convert Arrow RecordBatches to Arrow IPC Stream bytes.
-/// This is the bridge from DuckDB query results to the frontend.
-fn record_batches_to_ipc(batches: &[RecordBatch]) -> Result<Vec<u8>> {
-    if batches.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let schema = batches[0].schema();
-    let mut buffer: Vec<u8> = Vec::new();
-
-    {
-        let mut writer = StreamWriter::try_new(&mut buffer, &schema)
-            .map_err(|e| RustoraError::DuckDb(format!("Arrow IPC write error: {}", e)))?;
-
-        for batch in batches {
-            writer
-                .write(batch)
-                .map_err(|e| RustoraError::DuckDb(format!("Arrow IPC write error: {}", e)))?;
-        }
-
-        writer
-            .finish()
-            .map_err(|e| RustoraError::DuckDb(format!("Arrow IPC finish error: {}", e)))?;
-    }
-
-    Ok(buffer)
-}
 
 // ---------------------------------------------------------------------------
 // Tests

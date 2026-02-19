@@ -1,4 +1,4 @@
-import { useRef, useCallback, useEffect, useState } from "react";
+import { useRef, useCallback, useEffect, useState, useMemo } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { ParsedTable } from "../lib/arrow";
 import type { ColumnInfo } from "../hooks/useDataset";
@@ -30,6 +30,8 @@ interface DataGridProps {
 const ROW_HEIGHT = 28;
 const MIN_COL_WIDTH = 100;
 const MAX_COL_WIDTH = 400;
+const ROW_NUM_WIDTH = 52;
+const SCROLL_DEBOUNCE_MS = 120;
 
 function estimateColumnWidth(
   col: string,
@@ -85,6 +87,7 @@ export function DataGrid({
   loading,
 }: DataGridProps) {
   const parentRef = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<HTMLDivElement>(null);
   const rows = page?.rows ?? [];
 
   const [filterCol, setFilterCol] = useState<{
@@ -100,33 +103,75 @@ export function DataGrid({
     overscan: 20,
   });
 
-  const colWidths = columns.map((c) =>
-    rows.length > 0
-      ? estimateColumnWidth(c.name, rows, c.dtype)
-      : MIN_COL_WIDTH
+  const colWidths = useMemo(
+    () =>
+      columns.map((c) =>
+        rows.length > 0
+          ? estimateColumnWidth(c.name, rows, c.dtype)
+          : MIN_COL_WIDTH
+      ),
+    [columns, rows]
   );
-  const totalWidth = colWidths.reduce((a, b) => a + b, 0) + 52;
+
+  const totalWidth = useMemo(
+    () => colWidths.reduce((a, b) => a + b, 0) + ROW_NUM_WIDTH,
+    [colWidths]
+  );
+
+  const colOffsets = useMemo(() => {
+    const offsets = new Array(colWidths.length);
+    let acc = ROW_NUM_WIDTH;
+    for (let i = 0; i < colWidths.length; i++) {
+      offsets[i] = acc;
+      acc += colWidths[i];
+    }
+    return offsets;
+  }, [colWidths]);
+
+  const columnVirtualizer = useVirtualizer({
+    horizontal: true,
+    count: columns.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: (i) => colWidths[i] ?? MIN_COL_WIDTH,
+    overscan: 5,
+  });
+
+  // Debounced scroll handler for infinite-scroll pagination
+  const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleScroll = useCallback(() => {
     const el = parentRef.current;
-    if (!el || loading) return;
+    if (!el) return;
 
-    const { scrollTop, scrollHeight, clientHeight } = el;
-    const atBottom = scrollHeight - scrollTop - clientHeight < ROW_HEIGHT * 5;
-    const atTop = scrollTop < ROW_HEIGHT * 2;
-
-    if (atBottom && offset + pageSize < totalRows) {
-      onPageChange(Math.min(offset + pageSize, totalRows - 1));
-    } else if (atTop && offset > 0) {
-      onPageChange(Math.max(0, offset - pageSize));
+    // Sync header horizontal scroll with body
+    if (headerRef.current) {
+      headerRef.current.scrollLeft = el.scrollLeft;
     }
+
+    if (loading) return;
+
+    if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
+    scrollTimerRef.current = setTimeout(() => {
+      const { scrollTop, scrollHeight, clientHeight } = el;
+      const atBottom = scrollHeight - scrollTop - clientHeight < ROW_HEIGHT * 5;
+      const atTop = scrollTop < ROW_HEIGHT * 2;
+
+      if (atBottom && offset + pageSize < totalRows) {
+        onPageChange(Math.min(offset + pageSize, totalRows - 1));
+      } else if (atTop && offset > 0) {
+        onPageChange(Math.max(0, offset - pageSize));
+      }
+    }, SCROLL_DEBOUNCE_MS);
   }, [offset, pageSize, totalRows, loading, onPageChange]);
 
   useEffect(() => {
     const el = parentRef.current;
     if (!el) return;
     el.addEventListener("scroll", handleScroll, { passive: true });
-    return () => el.removeEventListener("scroll", handleScroll);
+    return () => {
+      el.removeEventListener("scroll", handleScroll);
+      if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
+    };
   }, [handleScroll]);
 
   if (columns.length === 0) {
@@ -185,46 +230,58 @@ export function DataGrid({
     );
   }
 
+  const virtualColumns = columnVirtualizer.getVirtualItems();
+
   return (
     <div className="grid-container">
-      {/* Column Headers */}
-      <div className="grid-header" style={{ width: totalWidth }}>
-        <div className="grid-row-num-header">#</div>
-        {columns.map((col, i) => (
-          <div
-            key={col.name}
-            className={`grid-header-cell ${sortColumn === col.name ? "sorted" : ""}`}
-            style={{ width: colWidths[i] }}
-            onClick={() => onSort(col.name)}
-            title={`${col.name} (${col.dtype})`}
-          >
-            <span className="header-name">{col.name}</span>
-            <span className="header-dtype">{col.dtype}</span>
-            {sortColumn === col.name && (
-              <span className="sort-indicator">
-                {sortDesc ? "\u25BC" : "\u25B2"}
-              </span>
-            )}
-            {onFilterStructured && (
-              <button
-                className="header-filter-btn"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                  setFilterCol({ name: col.name, dtype: col.dtype, rect });
+      {/* Column Headers -- scroll-synced with body via ref */}
+      <div ref={headerRef} className="grid-header" style={{ overflow: "hidden" }}>
+        <div style={{ width: totalWidth, display: "flex", minWidth: totalWidth }}>
+          <div className="grid-row-num-header">#</div>
+          {virtualColumns.map((vc) => {
+            const col = columns[vc.index];
+            const w = colWidths[vc.index];
+            return (
+              <div
+                key={col.name}
+                className={`grid-header-cell ${sortColumn === col.name ? "sorted" : ""}`}
+                style={{
+                  width: w,
+                  position: "absolute",
+                  left: colOffsets[vc.index],
                 }}
-                title={`Filter ${col.name}`}
+                onClick={() => onSort(col.name)}
+                title={`${col.name} (${col.dtype})`}
               >
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                  <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
-                </svg>
-              </button>
-            )}
-          </div>
-        ))}
+                <span className="header-name">{col.name}</span>
+                <span className="header-dtype">{col.dtype}</span>
+                {sortColumn === col.name && (
+                  <span className="sort-indicator">
+                    {sortDesc ? "\u25BC" : "\u25B2"}
+                  </span>
+                )}
+                {onFilterStructured && (
+                  <button
+                    className="header-filter-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                      setFilterCol({ name: col.name, dtype: col.dtype, rect });
+                    }}
+                    title={`Filter ${col.name}`}
+                  >
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
 
-      {/* Virtualized Rows */}
+      {/* Virtualized Rows + Columns */}
       <div ref={parentRef} className="grid-body">
         <div
           style={{
@@ -248,7 +305,8 @@ export function DataGrid({
                 }}
               >
                 <div className="grid-row-num">{rowIdx + 1}</div>
-                {columns.map((col, i) => {
+                {virtualColumns.map((vc) => {
+                  const col = columns[vc.index];
                   const val = row?.[col.name];
                   const isNull = val === null || val === undefined;
                   const isNumeric =
@@ -259,7 +317,11 @@ export function DataGrid({
                     <div
                       key={col.name}
                       className={`grid-cell ${isNumeric ? "numeric" : ""} ${isNull ? "null-val" : ""}`}
-                      style={{ width: colWidths[i] }}
+                      style={{
+                        width: colWidths[vc.index],
+                        position: "absolute",
+                        left: colOffsets[vc.index],
+                      }}
                       title={isNull ? "NULL" : String(val)}
                     >
                       {isNull ? "NULL" : formatCellValue(val)}

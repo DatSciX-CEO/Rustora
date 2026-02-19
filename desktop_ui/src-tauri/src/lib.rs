@@ -1,11 +1,13 @@
 use core_engine::{FilterCondition, FilterLogic, FilterOperator, FilterSpec, RustoraSession};
 use serde::{Deserialize, Serialize};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::State;
 
 /// Thread-safe wrapper around the core engine session.
+/// Uses Arc so the mutex can be cloned into async spawn_blocking tasks
+/// without holding a borrow on the Tauri State across await points.
 struct AppState {
-    session: Mutex<RustoraSession>,
+    session: Arc<Mutex<RustoraSession>>,
 }
 
 /// Column info returned to the frontend for schema display.
@@ -67,37 +69,52 @@ fn make_open_result(session: &RustoraSession, name: &str) -> Result<OpenResult, 
 
 /// Create a new project (.duckdb file).
 #[tauri::command]
-fn new_project(state: State<'_, AppState>, path: String) -> Result<ProjectInfo, String> {
-    let mut session = state.session.lock().map_err(|e| e.to_string())?;
-    session.new_project(&path).map_err(|e| e.to_string())?;
-    Ok(ProjectInfo {
-        path,
-        tables: vec![],
+async fn new_project(state: State<'_, AppState>, path: String) -> Result<ProjectInfo, String> {
+    let session = state.session.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut session = session.lock().map_err(|e| e.to_string())?;
+        session.new_project(&path).map_err(|e| e.to_string())?;
+        Ok(ProjectInfo {
+            path,
+            tables: vec![],
+        })
     })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Open an existing project (.duckdb file). Returns list of persistent tables.
 #[tauri::command]
-fn open_project(state: State<'_, AppState>, path: String) -> Result<ProjectInfo, String> {
-    let mut session = state.session.lock().map_err(|e| e.to_string())?;
-    let tables = session.open_project(&path).map_err(|e| e.to_string())?;
-    Ok(ProjectInfo { path, tables })
+async fn open_project(state: State<'_, AppState>, path: String) -> Result<ProjectInfo, String> {
+    let session = state.session.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut session = session.lock().map_err(|e| e.to_string())?;
+        let tables = session.open_project(&path).map_err(|e| e.to_string())?;
+        Ok(ProjectInfo { path, tables })
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Get current project info.
 #[tauri::command]
-fn get_project_info(state: State<'_, AppState>) -> Result<Option<ProjectInfo>, String> {
-    let session = state.session.lock().map_err(|e| e.to_string())?;
-    match session.project_path() {
-        Some(path) => {
-            let tables = session.list_datasets();
-            Ok(Some(ProjectInfo {
-                path: path.to_string(),
-                tables,
-            }))
+async fn get_project_info(state: State<'_, AppState>) -> Result<Option<ProjectInfo>, String> {
+    let session = state.session.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let session = session.lock().map_err(|e| e.to_string())?;
+        match session.project_path() {
+            Some(path) => {
+                let tables = session.list_datasets();
+                Ok(Some(ProjectInfo {
+                    path: path.to_string(),
+                    tables,
+                }))
+            }
+            None => Ok(None),
         }
-        None => Ok(None),
-    }
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 // ---------------------------------------------------------------------------
@@ -106,33 +123,41 @@ fn get_project_info(state: State<'_, AppState>) -> Result<Option<ProjectInfo>, S
 
 /// Import a file into the DuckDB project as a persistent table.
 #[tauri::command]
-fn import_file(
+async fn import_file(
     state: State<'_, AppState>,
     path: String,
     table_name: Option<String>,
 ) -> Result<OpenResult, String> {
-    let mut session = state.session.lock().map_err(|e| e.to_string())?;
-    let name = session
-        .import_file(&path, table_name.as_deref())
-        .map_err(|e| e.to_string())?;
-    make_open_result(&session, &name)
+    let session = state.session.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut session = session.lock().map_err(|e| e.to_string())?;
+        let name = session
+            .import_file(&path, table_name.as_deref())
+            .map_err(|e| e.to_string())?;
+        make_open_result(&session, &name)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Open a file (backwards-compatible: imports to DuckDB if project is open,
 /// falls back to transient Polars scan).
 #[tauri::command]
-fn open_file(state: State<'_, AppState>, path: String) -> Result<OpenResult, String> {
-    let mut session = state.session.lock().map_err(|e| e.to_string())?;
-
-    let name = if session.project_path().is_some() {
-        session
-            .import_file(&path, None)
-            .map_err(|e| e.to_string())?
-    } else {
-        session.scan_file(&path).map_err(|e| e.to_string())?
-    };
-
-    make_open_result(&session, &name)
+async fn open_file(state: State<'_, AppState>, path: String) -> Result<OpenResult, String> {
+    let session = state.session.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut session = session.lock().map_err(|e| e.to_string())?;
+        let name = if session.project_path().is_some() {
+            session
+                .import_file(&path, None)
+                .map_err(|e| e.to_string())?
+        } else {
+            session.scan_file(&path).map_err(|e| e.to_string())?
+        };
+        make_open_result(&session, &name)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 // ---------------------------------------------------------------------------
@@ -141,78 +166,106 @@ fn open_file(state: State<'_, AppState>, path: String) -> Result<OpenResult, Str
 
 /// Get a chunk of rows as Arrow IPC bytes for the virtualized grid.
 #[tauri::command]
-fn get_chunk(
+async fn get_chunk(
     state: State<'_, AppState>,
     dataset_name: String,
     offset: u32,
     limit: u32,
 ) -> Result<Vec<u8>, String> {
-    let session = state.session.lock().map_err(|e| e.to_string())?;
-    session
-        .get_chunk_ipc(&dataset_name, offset, limit)
-        .map_err(|e| e.to_string())
+    let session = state.session.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let session = session.lock().map_err(|e| e.to_string())?;
+        session
+            .get_chunk_ipc(&dataset_name, offset, limit)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Sort a dataset and return new dataset metadata.
 #[tauri::command]
-fn sort_dataset(
+async fn sort_dataset(
     state: State<'_, AppState>,
     dataset_name: String,
     columns: Vec<String>,
     descending: Vec<bool>,
 ) -> Result<OpenResult, String> {
-    let mut session = state.session.lock().map_err(|e| e.to_string())?;
-
-    let col_refs: Vec<&str> = columns.iter().map(|s| s.as_str()).collect();
-    let new_name = session
-        .sort_dataset(&dataset_name, &col_refs, &descending)
-        .map_err(|e| e.to_string())?;
-
-    make_open_result(&session, &new_name)
+    let session = state.session.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut session = session.lock().map_err(|e| e.to_string())?;
+        let col_refs: Vec<&str> = columns.iter().map(|s| s.as_str()).collect();
+        let new_name = session
+            .sort_dataset(&dataset_name, &col_refs, &descending)
+            .map_err(|e| e.to_string())?;
+        make_open_result(&session, &new_name)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Execute a SQL query against DuckDB and return the result dataset metadata.
 #[tauri::command]
-fn execute_sql(state: State<'_, AppState>, sql: String) -> Result<OpenResult, String> {
-    let mut session = state.session.lock().map_err(|e| e.to_string())?;
-    let new_name = session.execute_sql(&sql).map_err(|e| e.to_string())?;
-    make_open_result(&session, &new_name)
+async fn execute_sql(state: State<'_, AppState>, sql: String) -> Result<OpenResult, String> {
+    let session = state.session.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut session = session.lock().map_err(|e| e.to_string())?;
+        let new_name = session.execute_sql(&sql).map_err(|e| e.to_string())?;
+        make_open_result(&session, &new_name)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Export a dataset to a file (CSV or Parquet).
 #[tauri::command]
-fn export_dataset(
+async fn export_dataset(
     state: State<'_, AppState>,
     dataset_name: String,
     output_path: String,
     format: String,
 ) -> Result<(), String> {
-    let session = state.session.lock().map_err(|e| e.to_string())?;
-    match format.as_str() {
-        "csv" => session
-            .export_to_csv(&dataset_name, &output_path)
-            .map_err(|e| e.to_string()),
-        "parquet" => session
-            .export_to_parquet(&dataset_name, &output_path)
-            .map_err(|e| e.to_string()),
-        _ => Err(format!("Unsupported export format: {}", format)),
-    }
+    let session = state.session.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let session = session.lock().map_err(|e| e.to_string())?;
+        match format.as_str() {
+            "csv" => session
+                .export_to_csv(&dataset_name, &output_path)
+                .map_err(|e| e.to_string()),
+            "parquet" => session
+                .export_to_parquet(&dataset_name, &output_path)
+                .map_err(|e| e.to_string()),
+            _ => Err(format!("Unsupported export format: {}", format)),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// List all loaded datasets (persistent + transient).
 #[tauri::command]
-fn list_datasets(state: State<'_, AppState>) -> Result<Vec<String>, String> {
-    let session = state.session.lock().map_err(|e| e.to_string())?;
-    Ok(session.list_datasets())
+async fn list_datasets(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let session = state.session.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let session = session.lock().map_err(|e| e.to_string())?;
+        Ok(session.list_datasets())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Remove a dataset.
 #[tauri::command]
-fn remove_dataset(state: State<'_, AppState>, dataset_name: String) -> Result<bool, String> {
-    let mut session = state.session.lock().map_err(|e| e.to_string())?;
-    session
-        .remove_dataset(&dataset_name)
-        .map_err(|e| e.to_string())
+async fn remove_dataset(state: State<'_, AppState>, dataset_name: String) -> Result<bool, String> {
+    let session = state.session.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut session = session.lock().map_err(|e| e.to_string())?;
+        session
+            .remove_dataset(&dataset_name)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 // ---------------------------------------------------------------------------
@@ -221,16 +274,21 @@ fn remove_dataset(state: State<'_, AppState>, dataset_name: String) -> Result<bo
 
 /// Filter a dataset using a SQL WHERE clause.
 #[tauri::command]
-fn filter_dataset(
+async fn filter_dataset(
     state: State<'_, AppState>,
     dataset_name: String,
     where_clause: String,
 ) -> Result<OpenResult, String> {
-    let mut session = state.session.lock().map_err(|e| e.to_string())?;
-    let new_name = session
-        .filter_dataset_sql(&dataset_name, &where_clause)
-        .map_err(|e| e.to_string())?;
-    make_open_result(&session, &new_name)
+    let session = state.session.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut session = session.lock().map_err(|e| e.to_string())?;
+        let new_name = session
+            .filter_dataset_sql(&dataset_name, &where_clause)
+            .map_err(|e| e.to_string())?;
+        make_open_result(&session, &new_name)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// A single filter condition from the frontend.
@@ -261,14 +319,12 @@ fn parse_operator(op: &str) -> Result<FilterOperator, String> {
 
 /// Filter a dataset using structured conditions (safe from SQL injection).
 #[tauri::command]
-fn filter_dataset_structured(
+async fn filter_dataset_structured(
     state: State<'_, AppState>,
     dataset_name: String,
     conditions: Vec<FilterConditionInput>,
     logic: String,
 ) -> Result<OpenResult, String> {
-    let mut session = state.session.lock().map_err(|e| e.to_string())?;
-
     let parsed_conditions: Vec<FilterCondition> = conditions
         .into_iter()
         .map(|c| {
@@ -290,47 +346,63 @@ fn filter_dataset_structured(
         logic: filter_logic,
     };
 
-    let new_name = session
-        .filter_dataset_structured(&dataset_name, &spec)
-        .map_err(|e| e.to_string())?;
-    make_open_result(&session, &new_name)
+    let session = state.session.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut session = session.lock().map_err(|e| e.to_string())?;
+        let new_name = session
+            .filter_dataset_structured(&dataset_name, &spec)
+            .map_err(|e| e.to_string())?;
+        make_open_result(&session, &new_name)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Group a dataset by columns with aggregate expressions.
 #[tauri::command]
-fn group_by(
+async fn group_by(
     state: State<'_, AppState>,
     dataset_name: String,
     group_columns: Vec<String>,
     agg_exprs: Vec<String>,
 ) -> Result<OpenResult, String> {
-    let mut session = state.session.lock().map_err(|e| e.to_string())?;
-    let col_refs: Vec<&str> = group_columns.iter().map(|s| s.as_str()).collect();
-    let agg_refs: Vec<&str> = agg_exprs.iter().map(|s| s.as_str()).collect();
-    let new_name = session
-        .group_by(&dataset_name, &col_refs, &agg_refs)
-        .map_err(|e| e.to_string())?;
-    make_open_result(&session, &new_name)
+    let session = state.session.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut session = session.lock().map_err(|e| e.to_string())?;
+        let col_refs: Vec<&str> = group_columns.iter().map(|s| s.as_str()).collect();
+        let agg_refs: Vec<&str> = agg_exprs.iter().map(|s| s.as_str()).collect();
+        let new_name = session
+            .group_by(&dataset_name, &col_refs, &agg_refs)
+            .map_err(|e| e.to_string())?;
+        make_open_result(&session, &new_name)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Add a calculated column to a dataset.
 #[tauri::command]
-fn add_calculated_column(
+async fn add_calculated_column(
     state: State<'_, AppState>,
     dataset_name: String,
     expression: String,
     alias: String,
 ) -> Result<OpenResult, String> {
-    let mut session = state.session.lock().map_err(|e| e.to_string())?;
-    let new_name = session
-        .add_calculated_column(&dataset_name, &expression, &alias)
-        .map_err(|e| e.to_string())?;
-    make_open_result(&session, &new_name)
+    let session = state.session.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut session = session.lock().map_err(|e| e.to_string())?;
+        let new_name = session
+            .add_calculated_column(&dataset_name, &expression, &alias)
+            .map_err(|e| e.to_string())?;
+        make_open_result(&session, &new_name)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Aggregate data for chart visualization. Returns Arrow IPC bytes.
 #[tauri::command]
-fn aggregate_for_chart(
+async fn aggregate_for_chart(
     state: State<'_, AppState>,
     dataset_name: String,
     group_col: String,
@@ -338,28 +410,38 @@ fn aggregate_for_chart(
     agg_type: String,
     limit: u32,
 ) -> Result<Vec<u8>, String> {
-    let session = state.session.lock().map_err(|e| e.to_string())?;
-    session
-        .aggregate_for_chart(
-            &dataset_name,
-            &group_col,
-            value_col.as_deref(),
-            &agg_type,
-            limit,
-        )
-        .map_err(|e| e.to_string())
+    let session = state.session.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let session = session.lock().map_err(|e| e.to_string())?;
+        session
+            .aggregate_for_chart(
+                &dataset_name,
+                &group_col,
+                value_col.as_deref(),
+                &agg_type,
+                limit,
+            )
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Get summary statistics for a dataset as Arrow IPC bytes.
 #[tauri::command]
-fn get_summary_stats(
+async fn get_summary_stats(
     state: State<'_, AppState>,
     dataset_name: String,
 ) -> Result<Vec<u8>, String> {
-    let session = state.session.lock().map_err(|e| e.to_string())?;
-    session
-        .summary_stats_ipc(&dataset_name)
-        .map_err(|e| e.to_string())
+    let session = state.session.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let session = session.lock().map_err(|e| e.to_string())?;
+        session
+            .summary_stats_ipc(&dataset_name)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 // ---------------------------------------------------------------------------
@@ -372,7 +454,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
-            session: Mutex::new(RustoraSession::new()),
+            session: Arc::new(Mutex::new(RustoraSession::new())),
         })
         .invoke_handler(tauri::generate_handler![
             new_project,
