@@ -11,6 +11,7 @@ arrow-schema = "56"
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3.14"

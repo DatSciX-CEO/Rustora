@@ -104,13 +104,13 @@ fn condition_to_sql(cond: &FilterCondition) -> Result<String> {
                 format!("{} != '{}'", col, escaped_val)
             }
         }
-        FilterOperator::GreaterThan => format!("{} > {}", col, ensure_numeric(&cond.value)?),
+        FilterOperator::GreaterThan => format!("{} > {}", col, format_comparison_value(&cond.value)),
         FilterOperator::GreaterThanOrEqual => {
-            format!("{} >= {}", col, ensure_numeric(&cond.value)?)
+            format!("{} >= {}", col, format_comparison_value(&cond.value))
         }
-        FilterOperator::LessThan => format!("{} < {}", col, ensure_numeric(&cond.value)?),
+        FilterOperator::LessThan => format!("{} < {}", col, format_comparison_value(&cond.value)),
         FilterOperator::LessThanOrEqual => {
-            format!("{} <= {}", col, ensure_numeric(&cond.value)?)
+            format!("{} <= {}", col, format_comparison_value(&cond.value))
         }
         FilterOperator::Contains => format!("{} LIKE '%{}%'", col, escape_like(&cond.value)),
         FilterOperator::NotContains => {
@@ -129,12 +129,13 @@ fn is_numeric(s: &str) -> bool {
     s.parse::<f64>().is_ok()
 }
 
-fn ensure_numeric(s: &str) -> Result<&str> {
+/// Format a value for use in comparison operators (>, >=, <, <=).
+/// Numeric values are emitted bare; everything else is single-quoted and escaped.
+fn format_comparison_value(s: &str) -> String {
     if s.parse::<f64>().is_ok() {
-        Ok(s)
+        s.to_string()
     } else {
-        // Try as a quoted string for date comparison etc
-        Ok(s)
+        format!("'{}'", escape_sql_string(s))
     }
 }
 
@@ -246,5 +247,88 @@ mod tests {
             logic: FilterLogic::And,
         };
         assert!(spec.to_sql_where().is_err());
+    }
+
+    #[test]
+    fn test_non_numeric_comparison_is_quoted() {
+        let spec = FilterSpec {
+            conditions: vec![FilterCondition {
+                column: "created_at".to_string(),
+                operator: FilterOperator::GreaterThan,
+                value: "2024-01-01".to_string(),
+            }],
+            logic: FilterLogic::And,
+        };
+        let sql = spec.to_sql_where().unwrap();
+        assert_eq!(sql, "\"created_at\" > '2024-01-01'");
+    }
+
+    #[test]
+    fn test_injection_via_comparison_operator() {
+        let spec = FilterSpec {
+            conditions: vec![FilterCondition {
+                column: "age".to_string(),
+                operator: FilterOperator::GreaterThan,
+                value: "0; DROP TABLE users; --".to_string(),
+            }],
+            logic: FilterLogic::And,
+        };
+        let sql = spec.to_sql_where().unwrap();
+        assert_eq!(sql, "\"age\" > '0; DROP TABLE users; --'");
+    }
+
+    #[test]
+    fn test_unicode_value() {
+        let spec = FilterSpec {
+            conditions: vec![FilterCondition {
+                column: "city".to_string(),
+                operator: FilterOperator::Equals,
+                value: "\u{00FC}ber".to_string(),
+            }],
+            logic: FilterLogic::And,
+        };
+        let sql = spec.to_sql_where().unwrap();
+        assert_eq!(sql, "\"city\" = '\u{00FC}ber'");
+    }
+
+    #[test]
+    fn test_empty_string_value() {
+        let spec = FilterSpec {
+            conditions: vec![FilterCondition {
+                column: "name".to_string(),
+                operator: FilterOperator::Equals,
+                value: String::new(),
+            }],
+            logic: FilterLogic::And,
+        };
+        let sql = spec.to_sql_where().unwrap();
+        assert_eq!(sql, "\"name\" = ''");
+    }
+
+    #[test]
+    fn test_invalid_column_name_rejected() {
+        let spec = FilterSpec {
+            conditions: vec![FilterCondition {
+                column: "col; DROP TABLE x".to_string(),
+                operator: FilterOperator::Equals,
+                value: "val".to_string(),
+            }],
+            logic: FilterLogic::And,
+        };
+        assert!(spec.to_sql_where().is_err());
+    }
+
+    #[test]
+    fn test_like_wildcards_escaped() {
+        let spec = FilterSpec {
+            conditions: vec![FilterCondition {
+                column: "name".to_string(),
+                operator: FilterOperator::Contains,
+                value: "100%_done".to_string(),
+            }],
+            logic: FilterLogic::And,
+        };
+        let sql = spec.to_sql_where().unwrap();
+        assert_eq!(sql, "\"name\" LIKE '%100\\%\\_done%'");
     }
 }

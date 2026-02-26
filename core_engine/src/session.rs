@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::io::Cursor;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use tracing::info;
 
 /// Metadata about a loaded dataset.
 #[derive(Debug, Clone)]
@@ -51,8 +52,10 @@ impl RustoraSession {
     /// Open a persistent project file (.duckdb).
     /// Existing tables in the database become immediately available.
     pub fn open_project(&mut self, db_path: &str) -> Result<Vec<String>> {
+        info!(db_path, "opening project");
         let storage = DuckStorage::open(db_path)?;
         let tables = storage.list_tables()?;
+        info!(db_path, table_count = tables.len(), "project opened");
         self.storage = Some(storage);
         self.transient.clear();
         Ok(tables)
@@ -103,6 +106,7 @@ impl RustoraSession {
             None => self.generate_name(file_path),
         };
 
+        info!(file_path, table = %name, "importing file into session");
         storage.import_file(file_path, &name)?;
         Ok(name)
     }
@@ -273,6 +277,7 @@ impl RustoraSession {
         let storage = self.storage.as_ref().ok_or(RustoraError::NoProjectOpen)?;
 
         let result_name = format!("sql_result_{}", self.next_counter());
+        info!(sql_len = sql.len(), result_table = %result_name, "executing SQL");
         storage.execute_sql_to_table(sql, &result_name)?;
         Ok(result_name)
     }

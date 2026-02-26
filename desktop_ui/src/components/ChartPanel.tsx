@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { parseIpcBytes, type ParsedTable } from "../lib/arrow";
+import { errorMessage } from "../lib/error";
 import type { ColumnInfo } from "../hooks/useDataset";
 import {
   BarChart,
@@ -78,7 +79,7 @@ export function ChartPanel({
       const parsed: ParsedTable = parseIpcBytes(bytes);
       setChartData(parsed.rows);
     } catch (e) {
-      setError(String(e));
+      setError(errorMessage(e));
     } finally {
       setLoading(false);
     }

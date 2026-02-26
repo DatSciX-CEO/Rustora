@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { parseIpcBytes, type ParsedTable } from "../lib/arrow";
+import { errorMessage } from "../lib/error";
 
 export interface ColumnInfo {
   name: string;
@@ -97,7 +98,7 @@ export function useDataset() {
           sortDesc: false,
         }));
       } catch (e) {
-        setState((s) => ({ ...s, loading: false, error: String(e) }));
+        setState((s) => ({ ...s, loading: false, error: errorMessage(e) }));
       }
     },
     []
@@ -125,7 +126,7 @@ export function useDataset() {
           sortDesc: false,
         }));
       } catch (e) {
-        setState((s) => ({ ...s, loading: false, error: String(e) }));
+        setState((s) => ({ ...s, loading: false, error: errorMessage(e) }));
       }
     },
     []
@@ -177,7 +178,7 @@ export function useDataset() {
         }>("open_file", { path });
         await applyOpenResult(result);
       } catch (e) {
-        setState((s) => ({ ...s, loading: false, error: String(e) }));
+        setState((s) => ({ ...s, loading: false, error: errorMessage(e) }));
       }
     },
     [applyOpenResult]
@@ -196,7 +197,7 @@ export function useDataset() {
         }>("import_file", { path, tableName: tableName ?? null });
         await applyOpenResult(result);
       } catch (e) {
-        setState((s) => ({ ...s, loading: false, error: String(e) }));
+        setState((s) => ({ ...s, loading: false, error: errorMessage(e) }));
       }
     },
     [applyOpenResult]
@@ -236,7 +237,7 @@ export function useDataset() {
           tables: datasets,
         }));
       } catch (e) {
-        setState((s) => ({ ...s, loading: false, error: String(e) }));
+        setState((s) => ({ ...s, loading: false, error: errorMessage(e) }));
       }
     },
     []
@@ -264,7 +265,7 @@ export function useDataset() {
         }));
       } catch (e) {
         if (requestId !== pageRequestId.current) return;
-        setState((s) => ({ ...s, loading: false, error: String(e) }));
+        setState((s) => ({ ...s, loading: false, error: errorMessage(e) }));
       }
     },
     [fetchChunk]
@@ -292,7 +293,7 @@ export function useDataset() {
         await applyOpenResult({ ...result, persistent: result.persistent });
         setState((s) => ({ ...s, sortColumn: column, sortDesc: desc }));
       } catch (e) {
-        setState((s) => ({ ...s, loading: false, error: String(e) }));
+        setState((s) => ({ ...s, loading: false, error: errorMessage(e) }));
       }
     },
     [applyOpenResult, state.sortColumn, state.sortDesc]
@@ -311,7 +312,7 @@ export function useDataset() {
         }>("execute_sql", { sql });
         await applyOpenResult(result);
       } catch (e) {
-        setState((s) => ({ ...s, loading: false, error: String(e) }));
+        setState((s) => ({ ...s, loading: false, error: errorMessage(e) }));
       }
     },
     [applyOpenResult]
@@ -327,7 +328,7 @@ export function useDataset() {
           format,
         });
       } catch (e) {
-        setState((s) => ({ ...s, error: String(e) }));
+        setState((s) => ({ ...s, error: errorMessage(e) }));
       }
     },
     []
@@ -349,7 +350,7 @@ export function useDataset() {
           }));
         }
       } catch (e) {
-        setState((s) => ({ ...s, error: String(e) }));
+        setState((s) => ({ ...s, error: errorMessage(e) }));
       }
     },
     [refreshTableList]
@@ -374,7 +375,7 @@ export function useDataset() {
         });
         await applyOpenResult(result);
       } catch (e) {
-        setState((s) => ({ ...s, loading: false, error: String(e) }));
+        setState((s) => ({ ...s, loading: false, error: errorMessage(e) }));
       }
     },
     [applyOpenResult]
@@ -405,7 +406,7 @@ export function useDataset() {
         });
         await applyOpenResult(result);
       } catch (e) {
-        setState((s) => ({ ...s, loading: false, error: String(e) }));
+        setState((s) => ({ ...s, loading: false, error: errorMessage(e) }));
       }
     },
     [applyOpenResult]
@@ -429,7 +430,7 @@ export function useDataset() {
         });
         await applyOpenResult(result);
       } catch (e) {
-        setState((s) => ({ ...s, loading: false, error: String(e) }));
+        setState((s) => ({ ...s, loading: false, error: errorMessage(e) }));
       }
     },
     [applyOpenResult]
@@ -453,7 +454,7 @@ export function useDataset() {
         });
         await applyOpenResult(result);
       } catch (e) {
-        setState((s) => ({ ...s, loading: false, error: String(e) }));
+        setState((s) => ({ ...s, loading: false, error: errorMessage(e) }));
       }
     },
     [applyOpenResult]
@@ -467,7 +468,7 @@ export function useDataset() {
       });
       return parseIpcBytes(bytes);
     } catch (e) {
-      setState((s) => ({ ...s, error: String(e) }));
+      setState((s) => ({ ...s, error: errorMessage(e) }));
       return null;
     }
   }, []);

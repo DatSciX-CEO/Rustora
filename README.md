@@ -112,6 +112,23 @@ Rustora is built as a **Rust Cargo workspace** with strict layer separation. The
 
 ---
 
+## 🛠️ Project Structure & Error Handling
+
+### Why are there multiple `Cargo.toml` files?
+Rustora is organized as a **Rust Workspace**. This is the idiomatic way to manage a multi-component project where different parts have different build requirements:
+- **`core_engine`**: A library crate containing the core logic.
+- **`desktop_ui/src-tauri`**: A binary crate that builds the desktop application. Tauri expects its own configuration here.
+- **`python_api`**: A special `cdylib` crate for Python bindings.
+- **Root `Cargo.toml`**: The "single source of truth" that manages shared dependency versions (like `polars` or `serde`) across all members.
+
+### Robust Error Handling
+You may notice that SQL syntax errors or missing files do not crash the application. This is due to a multi-layered defensive strategy:
+1. **Rust Result Pattern**: The backend uses the `Result` type to return errors as data rather than panicking.
+2. **Tauri Bridge**: Errors are serialized into structured JSON and sent to the frontend.
+3. **React State**: The `useDataset` hook captures these errors in a `try...catch` block and updates the UI state, allowing the app to remain interactive while displaying a helpful message to the user.
+
+---
+
 ## 📦 Data Flow
 
 ### Ingest → Query → Render

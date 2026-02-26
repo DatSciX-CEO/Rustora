@@ -2,6 +2,7 @@ use crate::error::{Result, RustoraError};
 use arrow_ipc::writer::StreamWriter;
 use duckdb::Connection;
 use std::path::Path;
+use tracing::info;
 
 /// Metadata about a table stored in DuckDB.
 #[derive(Debug, Clone)]
@@ -75,6 +76,7 @@ impl DuckStorage {
             .to_lowercase();
 
         let safe_name = sanitize_table_name(table_name);
+        info!(file_path, table = %safe_name, format = %extension, "importing file into DuckDB");
 
         match extension.as_str() {
             "csv" | "tsv" => self.import_csv(file_path, &safe_name)?,
@@ -83,6 +85,7 @@ impl DuckStorage {
             other => return Err(RustoraError::UnsupportedFormat(other.to_string())),
         }
 
+        info!(table = %safe_name, "file imported successfully");
         Ok(safe_name)
     }
 
@@ -129,6 +132,7 @@ impl DuckStorage {
     /// Execute arbitrary SQL and stream the result directly as Arrow IPC bytes.
     /// Batches are written incrementally to avoid collecting the full result set in memory.
     pub fn query_to_ipc(&self, sql: &str) -> Result<Vec<u8>> {
+        info!(sql_len = sql.len(), "executing SQL query to IPC");
         let mut stmt = self
             .conn
             .prepare(sql)
@@ -206,14 +210,15 @@ impl DuckStorage {
 
         let mut stmt = self
             .conn
-            .prepare(&format!(
-                "SELECT column_name, data_type FROM information_schema.columns WHERE table_name = '{}' AND table_schema = 'main' ORDER BY ordinal_position",
-                table_name
-            ))
+            .prepare(
+                "SELECT column_name, data_type FROM information_schema.columns \
+                 WHERE table_name = ? AND table_schema = 'main' \
+                 ORDER BY ordinal_position",
+            )
             .map_err(|e| RustoraError::DuckDb(e.to_string()))?;
 
         let columns: Vec<(String, String)> = stmt
-            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .query_map([table_name], |row| Ok((row.get(0)?, row.get(1)?)))
             .map_err(|e| RustoraError::DuckDb(e.to_string()))?
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(|e| RustoraError::DuckDb(e.to_string()))?;
