@@ -1,8 +1,18 @@
+/**
+ * SqlPanel — collapsible SQL query editor panel.
+ *
+ * Renders only when `visible` is true. Accepts SQL text and dispatches it to the
+ * `onExecute` callback on either Ctrl+Enter (keyboard) or the Run button click.
+ * The textarea intentionally has spellCheck disabled as SQL is not natural language.
+ */
 import { useState, useRef, useCallback } from "react";
 
 interface SqlPanelProps {
+  /** Called with the trimmed SQL string when the user submits a query. */
   onExecute: (sql: string) => void;
+  /** When true, disables the Run button and keyboard shortcut. */
   loading: boolean;
+  /** Controls whether the panel is rendered. */
   visible: boolean;
 }
 

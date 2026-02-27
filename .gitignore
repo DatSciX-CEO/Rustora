@@ -14,3 +14,6 @@ Thumbs.db
 # IDE
 .vscode/
 *.swp
+
+# Docs
+dev_docs

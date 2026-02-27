@@ -3,6 +3,20 @@ import { invoke } from "@tauri-apps/api/core";
 import { parseIpcBytes, type ParsedTable } from "../lib/arrow";
 import { errorMessage } from "../lib/error";
 
+/**
+ * useDataset — central state hook managing all data operations for the active dataset.
+ *
+ * Wraps all Tauri IPC commands for dataset lifecycle (open, import, export, remove),
+ * transformations (filter, sort, group-by, calculated columns, SQL), and pagination.
+ *
+ * Request deduplication: a `pageRequestId` ref prevents stale page-load responses
+ * from overwriting newer data when the user scrolls quickly. Transform operations
+ * use a similar `transformRequestId` ref for the same purpose.
+ *
+ * Retry: `retryLastAction` re-invokes the most recently failed action with the same
+ * arguments, allowing the UI to offer a "Retry" button without storing action state.
+ */
+
 export interface ColumnInfo {
   name: string;
   dtype: string;
@@ -52,6 +66,10 @@ export function useDataset() {
 
   const activeDataset = useRef<string | null>(null);
   const pageRequestId = useRef(0);
+  /** Request ID for transform operations (filter, sort, SQL, group-by, add column). */
+  const transformRequestId = useRef(0);
+  /** Stores the most recent failed action so it can be retried. */
+  const retryRef = useRef<(() => Promise<void>) | null>(null);
 
   const fetchChunk = useCallback(
     async (datasetName: string, offset: number, limit: number) => {
@@ -71,6 +89,13 @@ export function useDataset() {
       setState((s) => ({ ...s, tables }));
     } catch {
       // ignore
+    }
+  }, []);
+
+  /** Re-invoke the most recently failed action with the same arguments. */
+  const retryLastAction = useCallback(async () => {
+    if (retryRef.current) {
+      await retryRef.current();
     }
   }, []);
 
@@ -274,9 +299,11 @@ export function useDataset() {
   const sortBy = useCallback(
     async (column: string) => {
       if (!activeDataset.current) return;
+      retryRef.current = async () => sortBy(column);
       setState((s) => ({ ...s, loading: true, error: null }));
 
       const desc = state.sortColumn === column ? !state.sortDesc : false;
+      const requestId = ++transformRequestId.current;
 
       try {
         const result = await invoke<{
@@ -290,9 +317,11 @@ export function useDataset() {
           columns: [column],
           descending: [desc],
         });
+        if (requestId !== transformRequestId.current) return;
         await applyOpenResult({ ...result, persistent: result.persistent });
         setState((s) => ({ ...s, sortColumn: column, sortDesc: desc }));
       } catch (e) {
+        if (requestId !== transformRequestId.current) return;
         setState((s) => ({ ...s, loading: false, error: errorMessage(e) }));
       }
     },
@@ -301,7 +330,9 @@ export function useDataset() {
 
   const executeSql = useCallback(
     async (sql: string) => {
+      retryRef.current = async () => executeSql(sql);
       setState((s) => ({ ...s, loading: true, error: null }));
+      const requestId = ++transformRequestId.current;
       try {
         const result = await invoke<{
           dataset_name: string;
@@ -310,8 +341,10 @@ export function useDataset() {
           persistent: boolean;
           size_bytes: number | null;
         }>("execute_sql", { sql });
+        if (requestId !== transformRequestId.current) return;
         await applyOpenResult(result);
       } catch (e) {
+        if (requestId !== transformRequestId.current) return;
         setState((s) => ({ ...s, loading: false, error: errorMessage(e) }));
       }
     },
@@ -361,7 +394,9 @@ export function useDataset() {
   const filterDataset = useCallback(
     async (whereClause: string) => {
       if (!activeDataset.current) return;
+      retryRef.current = async () => filterDataset(whereClause);
       setState((s) => ({ ...s, loading: true, error: null }));
+      const requestId = ++transformRequestId.current;
       try {
         const result = await invoke<{
           dataset_name: string;
@@ -373,8 +408,10 @@ export function useDataset() {
           datasetName: activeDataset.current,
           whereClause,
         });
+        if (requestId !== transformRequestId.current) return;
         await applyOpenResult(result);
       } catch (e) {
+        if (requestId !== transformRequestId.current) return;
         setState((s) => ({ ...s, loading: false, error: errorMessage(e) }));
       }
     },
@@ -391,7 +428,9 @@ export function useDataset() {
       logic: string = "and"
     ) => {
       if (!activeDataset.current) return;
+      retryRef.current = async () => filterDatasetStructured(conditions, logic);
       setState((s) => ({ ...s, loading: true, error: null }));
+      const requestId = ++transformRequestId.current;
       try {
         const result = await invoke<{
           dataset_name: string;
@@ -404,8 +443,10 @@ export function useDataset() {
           conditions,
           logic,
         });
+        if (requestId !== transformRequestId.current) return;
         await applyOpenResult(result);
       } catch (e) {
+        if (requestId !== transformRequestId.current) return;
         setState((s) => ({ ...s, loading: false, error: errorMessage(e) }));
       }
     },
@@ -415,7 +456,9 @@ export function useDataset() {
   const groupByDataset = useCallback(
     async (groupColumns: string[], aggExprs: string[]) => {
       if (!activeDataset.current) return;
+      retryRef.current = async () => groupByDataset(groupColumns, aggExprs);
       setState((s) => ({ ...s, loading: true, error: null }));
+      const requestId = ++transformRequestId.current;
       try {
         const result = await invoke<{
           dataset_name: string;
@@ -428,8 +471,10 @@ export function useDataset() {
           groupColumns,
           aggExprs,
         });
+        if (requestId !== transformRequestId.current) return;
         await applyOpenResult(result);
       } catch (e) {
+        if (requestId !== transformRequestId.current) return;
         setState((s) => ({ ...s, loading: false, error: errorMessage(e) }));
       }
     },
@@ -439,7 +484,9 @@ export function useDataset() {
   const addCalculatedColumn = useCallback(
     async (expression: string, alias: string) => {
       if (!activeDataset.current) return;
+      retryRef.current = async () => addCalculatedColumn(expression, alias);
       setState((s) => ({ ...s, loading: true, error: null }));
+      const requestId = ++transformRequestId.current;
       try {
         const result = await invoke<{
           dataset_name: string;
@@ -452,8 +499,10 @@ export function useDataset() {
           expression,
           alias,
         });
+        if (requestId !== transformRequestId.current) return;
         await applyOpenResult(result);
       } catch (e) {
+        if (requestId !== transformRequestId.current) return;
         setState((s) => ({ ...s, loading: false, error: errorMessage(e) }));
       }
     },
@@ -490,6 +539,7 @@ export function useDataset() {
     groupByDataset,
     addCalculatedColumn,
     getSummaryStats,
+    retryLastAction,
   };
 }
 

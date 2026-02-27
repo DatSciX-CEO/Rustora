@@ -5,13 +5,17 @@ from typing import Optional
 class Session:
     """Core session managing all data operations.
 
+    .. note::
+        ``Session`` is **not thread-safe** and must be used from a single thread.
+        Do not share a ``Session`` instance across threads.
+
     Usage::
 
         import rustora
 
         session = rustora.Session()
         session.new_project("analysis.duckdb")
-        session.import_file("data.csv", "my_table")
+        session.import_file("data.csv")          # table_name is optional
         ipc_bytes = session.get_preview("my_table", 100)
     """
 
@@ -95,7 +99,7 @@ class Session:
 
         Args:
             name: Dataset / table name.
-            limit: Maximum number of rows to return.
+            limit: Maximum number of rows to return. Must be non-negative.
 
         Returns:
             Arrow IPC stream bytes. Parse with ``pyarrow.ipc.open_stream``
@@ -111,8 +115,8 @@ class Session:
 
         Args:
             name: Dataset / table name.
-            offset: Row offset to start from.
-            limit: Maximum number of rows to return.
+            offset: Row offset to start from. Must be non-negative.
+            limit: Maximum number of rows to return. Must be non-negative.
 
         Returns:
             Arrow IPC stream bytes.
@@ -164,7 +168,8 @@ class Session:
             The name of the new sorted dataset.
 
         Raises:
-            RuntimeError: If the dataset is not found.
+            ValueError: If ``columns`` and ``descending`` have different lengths, or if
+                the dataset is not found.
         """
         ...
 

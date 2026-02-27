@@ -1,3 +1,11 @@
+/**
+ * App — root application component for the Rustora desktop application.
+ *
+ * Wires together the useDataset hook with all UI components. Manages SQL panel
+ * and chart panel visibility state locally, and delegates all data operations
+ * to the useDataset hook. File dialog interactions for the welcome screen are
+ * handled here to avoid importing Tauri dialog APIs into child components.
+ */
 import { useState, useCallback } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { useDataset } from "./hooks/useDataset";
@@ -35,6 +43,7 @@ function App() {
     groupByDataset,
     addCalculatedColumn,
     getSummaryStats,
+    retryLastAction,
   } = useDataset();
   const [sqlVisible, setSqlVisible] = useState(false);
   const [chartVisible, setChartVisible] = useState(false);
@@ -142,6 +151,7 @@ function App() {
           projectPath={state.project?.path ?? null}
           error={state.error}
           loading={state.loading}
+          onRetry={retryLastAction}
         />
       </div>
     </ErrorBoundary>

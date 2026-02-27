@@ -209,6 +209,30 @@ The build process will produce:
 
 > **Note:** The `target` directory is excluded from version control (git-ignored). When cloning this repository on a new machine, you **must run the build command** to generate the executable.
 
+### Alternative: Using Cargo Instead of npm
+
+If you can't use `npm`, you can install the Tauri CLI via Cargo and use an alternative package manager for front-end dependencies:
+
+```bash
+# 1. Install the Tauri CLI (one-time)
+cargo install tauri-cli
+
+# 2. Install frontend dependencies with an npm alternative:
+#    Pick ONE of the following:
+cd desktop_ui
+yarn install        # https://yarnpkg.com
+pnpm install        # https://pnpm.io
+bun install         # https://bun.sh
+
+# 3. Launch in development mode
+cargo tauri dev
+
+# 4. Build the release .exe
+cargo tauri build
+```
+
+> **Note:** The React frontend requires a JavaScript package manager for the initial dependency install. After that one-time setup, you can use `cargo tauri dev` and `cargo tauri build` exclusively — no further npm usage required.
+
 ### Run Tests
 
 ```bash
@@ -275,6 +299,7 @@ Use the **CSV** or **Parquet** toolbar buttons to export the current dataset to 
 ```
 rustora/
 ├── Cargo.toml                      # Workspace root
+├── CODE_REVIEW.md                  # 📖 Deep-dive into application architecture, file logic, and code
 ├── core_engine/                    # 🧠 THE BRAIN — Pure Rust data engine
 │   ├── Cargo.toml
 │   └── src/
@@ -285,7 +310,7 @@ rustora/
 ├── desktop_ui/                     # 🖥️ THE GUI — Tauri v2 + React
 │   ├── src-tauri/
 │   │   └── src/
-│   │       ├── lib.rs              # 11 Tauri commands bridging UI ↔ core_engine
+│   │       ├── lib.rs              # Tauri commands bridging UI ↔ core_engine
 │   │       └── main.rs             # Entry point
 │   ├── src/
 │   │   ├── App.tsx                 # Root component

@@ -1,3 +1,14 @@
+/**
+ * DataGrid — high-performance virtualized data grid with row and column virtualization.
+ *
+ * Uses @tanstack/react-virtual for both row and column virtualization so that only
+ * the visible subset of cells is rendered in the DOM. Column widths are estimated by
+ * sampling up to 50 rows and measuring max character length. Pagination is handled
+ * via scroll-position detection with a debounce timer to avoid excessive page loads.
+ *
+ * Data flow: `page` prop contains the current Arrow IPC-decoded page of rows.
+ * Scrolling near the bottom triggers `onPageChange` to load the next page.
+ */
 import { useRef, useCallback, useEffect, useState, useMemo } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { ParsedTable } from "../lib/arrow";
@@ -27,10 +38,19 @@ interface DataGridProps {
   loading: boolean;
 }
 
+/** Height of each data row in pixels — matches the CSS `.grid-row` height. */
 const ROW_HEIGHT = 28;
+/** Minimum column width in pixels — prevents columns from becoming unreadable. */
 const MIN_COL_WIDTH = 100;
+/** Maximum column width in pixels — prevents very long strings from dominating. */
 const MAX_COL_WIDTH = 400;
+/** Width of the row-number gutter column in pixels. */
 const ROW_NUM_WIDTH = 52;
+/**
+ * Debounce delay for scroll-triggered page loads in milliseconds.
+ * 120ms balances responsiveness with avoiding redundant page requests during
+ * fast scroll momentum, without noticeable lag for typical user scrolling.
+ */
 const SCROLL_DEBOUNCE_MS = 120;
 
 function estimateColumnWidth(

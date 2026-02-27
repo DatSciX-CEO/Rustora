@@ -1,7 +1,19 @@
+/**
+ * MenuBar — application toolbar with brand header, ribbon groups, and dialog triggers.
+ *
+ * Renders the top brand bar (RUSTORA title, project badge, dataset badge) and
+ * a persistent ribbon toolbar with PROJECT, DATA, TRANSFORM, ANALYZE, and EXPORT
+ * action groups. Conditionally mounts dialog overlays for Filter, Group By,
+ * Add Column, and Summary Statistics operations.
+ */
 import { useState, useRef, useEffect } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import type { ProjectInfo, ColumnInfo } from "../hooks/useDataset";
 import type { ParsedTable } from "../lib/arrow";
+import { FilterDialog } from "./FilterDialog";
+import { GroupByDialog } from "./GroupByDialog";
+import { CalcColumnDialog } from "./CalcColumnDialog";
+import { StatsPanel } from "./StatsPanel";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -320,209 +332,3 @@ export function MenuBar({
     );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Dialogs
-// ═══════════════════════════════════════════════════════════════════════════
-
-function FilterDialog({
-    columns,
-    onSubmit,
-    onClose,
-}: {
-    columns: ColumnInfo[];
-    onSubmit: (clause: string) => void;
-    onClose: () => void;
-}) {
-    const [clause, setClause] = useState("");
-    return (
-        <div className="dialog-overlay" onClick={onClose}>
-            <div className="dialog" onClick={(e) => e.stopPropagation()}>
-                <h3>Filter Rows</h3>
-                <p className="dialog-help">
-                    Enter a SQL WHERE clause. Available columns:{" "}
-                    <span className="dialog-cols">{columns.map((c) => c.name).join(", ")}</span>
-                </p>
-                <textarea
-                    className="dialog-input"
-                    placeholder='e.g. age > 30 AND city = &#39;Boston&#39;'
-                    value={clause}
-                    onChange={(e) => setClause(e.target.value)}
-                    onKeyDown={(e) => {
-                        if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && clause.trim()) {
-                            onSubmit(clause.trim());
-                        }
-                    }}
-                    autoFocus
-                />
-                <div className="dialog-actions">
-                    <button className="dialog-btn-secondary" onClick={onClose}>Cancel</button>
-                    <button
-                        className="dialog-btn-primary"
-                        disabled={!clause.trim()}
-                        onClick={() => onSubmit(clause.trim())}
-                    >
-                        Apply Filter
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
-}
-
-function GroupByDialog({
-    columns,
-    onSubmit,
-    onClose,
-}: {
-    columns: ColumnInfo[];
-    onSubmit: (groupCols: string[], aggs: string[]) => void;
-    onClose: () => void;
-}) {
-    const [selectedCols, setSelectedCols] = useState<Set<string>>(new Set());
-    const [aggExpr, setAggExpr] = useState("COUNT(*)");
-
-    const toggleCol = (name: string) => {
-        setSelectedCols((prev) => {
-            const next = new Set(prev);
-            if (next.has(name)) next.delete(name);
-            else next.add(name);
-            return next;
-        });
-    };
-
-    return (
-        <div className="dialog-overlay" onClick={onClose}>
-            <div className="dialog" onClick={(e) => e.stopPropagation()}>
-                <h3>Group By</h3>
-                <p className="dialog-help">Select columns to group by:</p>
-                <div className="dialog-col-grid">
-                    {columns.map((c) => (
-                        <label key={c.name} className="dialog-col-check">
-                            <input
-                                type="checkbox"
-                                checked={selectedCols.has(c.name)}
-                                onChange={() => toggleCol(c.name)}
-                            />
-                            <span>{c.name}</span>
-                            <span className="dialog-col-dtype">{c.dtype}</span>
-                        </label>
-                    ))}
-                </div>
-                <p className="dialog-help" style={{ marginTop: 12 }}>
-                    Aggregation expressions (comma-separated):
-                </p>
-                <textarea
-                    className="dialog-input"
-                    placeholder="COUNT(*), AVG(salary), SUM(amount)"
-                    value={aggExpr}
-                    onChange={(e) => setAggExpr(e.target.value)}
-                />
-                <div className="dialog-actions">
-                    <button className="dialog-btn-secondary" onClick={onClose}>Cancel</button>
-                    <button
-                        className="dialog-btn-primary"
-                        disabled={selectedCols.size === 0 || !aggExpr.trim()}
-                        onClick={() =>
-                            onSubmit(
-                                Array.from(selectedCols),
-                                aggExpr.split(",").map((s) => s.trim()).filter(Boolean)
-                            )
-                        }
-                    >
-                        Apply Group By
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
-}
-
-function CalcColumnDialog({
-    onSubmit,
-    onClose,
-}: {
-    onSubmit: (expr: string, alias: string) => void;
-    onClose: () => void;
-}) {
-    const [expr, setExpr] = useState("");
-    const [alias, setAlias] = useState("");
-
-    return (
-        <div className="dialog-overlay" onClick={onClose}>
-            <div className="dialog" onClick={(e) => e.stopPropagation()}>
-                <h3>Add Calculated Column</h3>
-                <p className="dialog-help">Column Name:</p>
-                <input
-                    className="dialog-input-single"
-                    placeholder="e.g. annual_salary"
-                    value={alias}
-                    onChange={(e) => setAlias(e.target.value)}
-                    autoFocus
-                />
-                <p className="dialog-help" style={{ marginTop: 8 }}>SQL Expression:</p>
-                <textarea
-                    className="dialog-input"
-                    placeholder="e.g. salary * 12"
-                    value={expr}
-                    onChange={(e) => setExpr(e.target.value)}
-                />
-                <div className="dialog-actions">
-                    <button className="dialog-btn-secondary" onClick={onClose}>Cancel</button>
-                    <button
-                        className="dialog-btn-primary"
-                        disabled={!expr.trim() || !alias.trim()}
-                        onClick={() => onSubmit(expr.trim(), alias.trim())}
-                    >
-                        Add Column
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
-}
-
-function StatsPanel({
-    data,
-    onClose,
-}: {
-    data: ParsedTable | null;
-    onClose: () => void;
-}) {
-    return (
-        <div className="stats-panel-overlay" onClick={onClose}>
-            <div className="stats-panel" onClick={(e) => e.stopPropagation()}>
-                <div className="stats-panel-header">
-                    <h3>Summary Statistics</h3>
-                    <button className="stats-close-btn" onClick={onClose}>&times;</button>
-                </div>
-                {!data ? (
-                    <div className="stats-loading">
-                        <div className="grid-loading-spinner" />
-                        <span>Calculating…</span>
-                    </div>
-                ) : (
-                    <div className="stats-table-wrap">
-                        <table className="stats-table">
-                            <thead>
-                                <tr>
-                                    {data.columns.map((c) => (
-                                        <th key={c}>{c}</th>
-                                    ))}
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {data.rows.map((row, i) => (
-                                    <tr key={i}>
-                                        {data.columns.map((c) => (
-                                            <td key={c}>{row[c] != null ? String(row[c]) : "—"}</td>
-                                        ))}
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                )}
-            </div>
-        </div>
-    );
-}

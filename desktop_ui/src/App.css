@@ -61,6 +61,54 @@
   color-scheme: light;
 }
 
+/* ── Dark mode overrides (respects OS preference) ────────────────────────── */
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* Backgrounds */
+    --bg-base: #1a1612;
+    --bg-surface: #231f1b;
+    --bg-elevated: #2a2520;
+    --bg-hover: #332e28;
+    --bg-active: #3d3830;
+
+    /* Borders */
+    --border-subtle: #3a342c;
+    --border-default: #4a4238;
+    --border-strong: #5c5248;
+
+    /* Text */
+    --text-primary: #f0ebe4;
+    --text-secondary: #c4b8aa;
+    --text-muted: #8a7d6e;
+
+    /* Rust / Copper Accent — slightly lighter for dark backgrounds */
+    --accent: #d4723c;
+    --accent-hover: #e0824c;
+    --accent-dim: rgba(212, 114, 60, 0.12);
+    --accent-border: rgba(212, 114, 60, 0.3);
+    --text-accent: #e0824c;
+
+    /* Steel Blue Secondary — slightly lighter for dark backgrounds */
+    --blue: #5a9cd4;
+    --blue-hover: #6aacde;
+    --blue-dim: rgba(90, 156, 212, 0.1);
+    --blue-border: rgba(90, 156, 212, 0.25);
+    --text-blue: #6aacde;
+
+    /* Semantic */
+    --success: #4aaa72;
+    --warning: #d4a020;
+    --error: #e05050;
+    --null-color: #7a6a5a;
+
+    /* Grid */
+    --grid-row-even: #231f1b;
+    --grid-row-odd: #1e1a16;
+    --grid-row-hover: #332e28;
+    --grid-header-bg: #2a2520;
+  }
+}
+
 * {
   margin: 0;
   padding: 0;

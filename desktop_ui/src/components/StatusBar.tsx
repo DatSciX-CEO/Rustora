@@ -1,16 +1,37 @@
+/**
+ * StatusBar — bottom status bar showing dataset metrics, loading state, and errors.
+ *
+ * Displays row/column counts, size estimate, current page range, storage type
+ * (DuckDB persistent or transient), and project path on the right side.
+ *
+ * When an error is present, the bar switches to an error state with a dismiss
+ * button (×) and an optional Retry button if `onRetry` is provided.
+ */
 import { useState, useEffect } from "react";
 
 interface StatusBarProps {
+  /** Total row count of the active dataset. */
   totalRows: number;
+  /** Total column count of the active dataset. */
   totalColumns: number;
+  /** Byte offset of the first row in the current page. */
   offset: number;
+  /** Number of rows per page. */
   pageSize: number;
+  /** Active dataset name, or null if no dataset is loaded. */
   datasetName: string | null;
+  /** Estimated in-memory size in bytes, or null if unknown. */
   sizeBytes: number | null;
+  /** Whether the active dataset is a persistent DuckDB table. */
   persistent: boolean;
+  /** Path to the open project file, or null if no project is open. */
   projectPath: string | null;
+  /** Current error message to display, or null if no error. */
   error: string | null;
+  /** Whether a data operation is in progress. */
   loading: boolean;
+  /** If provided, a Retry button is shown alongside the error dismiss button. */
+  onRetry?: () => void;
 }
 
 function formatBytes(bytes: number): string {
@@ -31,6 +52,7 @@ export function StatusBar({
   projectPath,
   error,
   loading,
+  onRetry,
 }: StatusBarProps) {
   const visibleEnd = Math.min(offset + pageSize, totalRows);
   const [dismissedError, setDismissedError] = useState<string | null>(null);
@@ -54,6 +76,15 @@ export function StatusBar({
               <line x1="12" y1="16" x2="12.01" y2="16" />
             </svg>
             {error}
+            {onRetry && (
+              <button
+                className="status-error-retry"
+                onClick={() => { setDismissedError(error); onRetry(); }}
+                title="Retry the last failed operation"
+              >
+                Retry
+              </button>
+            )}
             <button
               className="status-error-dismiss"
               onClick={() => setDismissedError(error)}

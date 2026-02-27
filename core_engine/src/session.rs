@@ -5,7 +5,8 @@ use polars::prelude::*;
 use std::collections::HashMap;
 use std::io::Cursor;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tracing::info;
 
 /// Metadata about a loaded dataset.
@@ -34,8 +35,8 @@ pub struct RustoraSession {
     storage: Option<DuckStorage>,
     /// Transient Polars LazyFrames (for non-persistent computed results).
     transient: HashMap<String, LazyFrame>,
-    /// Counter for generating unique names.
-    counter: Arc<Mutex<u64>>,
+    /// Monotonically increasing counter for generating unique dataset names.
+    counter: Arc<AtomicU64>,
 }
 
 impl RustoraSession {
@@ -45,7 +46,7 @@ impl RustoraSession {
         Self {
             storage,
             transient: HashMap::new(),
-            counter: Arc::new(Mutex::new(0)),
+            counter: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -78,10 +79,9 @@ impl RustoraSession {
         self.storage.as_ref().ok_or(RustoraError::NoProjectOpen)
     }
 
+    /// Atomically increment and return the next unique counter value.
     fn next_counter(&self) -> u64 {
-        let mut counter = self.counter.lock().unwrap_or_else(|e| e.into_inner());
-        *counter += 1;
-        *counter
+        self.counter.fetch_add(1, Ordering::Relaxed) + 1
     }
 
     fn generate_name(&self, file_path: &str) -> String {
@@ -225,7 +225,7 @@ impl RustoraSession {
 
         if let Some(lf) = self.transient.get(name) {
             let df = lf.clone().limit(limit).collect()?;
-            return Self::dataframe_to_ipc_bytes(&df);
+            return Self::dataframe_to_ipc_bytes(df);
         }
 
         Err(RustoraError::TableNotFound(name.to_string()))
@@ -241,7 +241,7 @@ impl RustoraSession {
 
         if let Some(lf) = self.transient.get(name) {
             let df = lf.clone().slice(offset as i64, limit).collect()?;
-            return Self::dataframe_to_ipc_bytes(&df);
+            return Self::dataframe_to_ipc_bytes(df);
         }
 
         Err(RustoraError::TableNotFound(name.to_string()))
@@ -573,13 +573,14 @@ impl RustoraSession {
     // -----------------------------------------------------------------------
 
     /// Serialize a Polars DataFrame to Arrow IPC Stream bytes.
-    fn dataframe_to_ipc_bytes(df: &DataFrame) -> Result<Vec<u8>> {
+    /// Takes ownership of `df` to avoid an internal clone during IPC serialization.
+    fn dataframe_to_ipc_bytes(mut df: DataFrame) -> Result<Vec<u8>> {
         let mut buffer: Vec<u8> = Vec::new();
         let cursor = Cursor::new(&mut buffer);
 
         IpcStreamWriter::new(cursor)
             .with_compat_level(CompatLevel::newest())
-            .finish(&mut df.clone())?;
+            .finish(&mut df)?;
 
         Ok(buffer)
     }

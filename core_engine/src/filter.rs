@@ -81,6 +81,7 @@ fn sanitize_column_name(name: &str) -> Result<String> {
     }
 }
 
+/// Escape a string value for safe embedding in a SQL single-quoted literal.
 fn escape_sql_string(val: &str) -> String {
     val.replace('\'', "''")
 }
@@ -139,8 +140,10 @@ fn format_comparison_value(s: &str) -> String {
     }
 }
 
+/// Escape a value for use in a SQL LIKE pattern.
+/// Calls [`escape_sql_string`] for single-quote safety, then escapes LIKE wildcards.
 fn escape_like(s: &str) -> String {
-    s.replace('\'', "''")
+    escape_sql_string(s)
         .replace('%', "\\%")
         .replace('_', "\\_")
 }

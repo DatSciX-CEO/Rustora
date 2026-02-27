@@ -337,9 +337,12 @@ impl DuckStorage {
 // ---------------------------------------------------------------------------
 
 /// Sanitize a string for use as a DuckDB table name.
+/// Replaces non-alphanumeric characters with underscores and truncates to 64 characters
+/// to prevent identifier length overflows in DuckDB.
 fn sanitize_table_name(name: &str) -> String {
     name.chars()
         .map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' })
+        .take(64)
         .collect()
 }
 

@@ -1,4 +1,12 @@
+/**
+ * FilterPopover — inline column filter popover anchored below a column header button.
+ *
+ * Detects the column's data type (numeric vs. text) and shows the appropriate
+ * set of operators. Applies the filter on "Apply" click or Enter key press.
+ * Closes when clicking outside the popover or pressing Escape.
+ */
 import { useState, useRef, useEffect } from "react";
+import { TEXT_OPERATORS, NUMERIC_OPERATORS } from "../constants/filterOperators";
 
 export interface FilterCondition {
   column: string;
@@ -7,34 +15,17 @@ export interface FilterCondition {
 }
 
 interface FilterPopoverProps {
+  /** Column name the filter applies to. */
   column: string;
+  /** Data type string from Arrow/DuckDB (e.g. "Int64", "Utf8", "Float64"). */
   dtype: string;
+  /** Bounding rect of the header button — used to position the popover. */
   anchorRect: DOMRect;
+  /** Called with filter conditions when the user applies the filter. */
   onApply: (conditions: FilterCondition[], logic: string) => void;
+  /** Called when the popover should be dismissed. */
   onClose: () => void;
 }
-
-const TEXT_OPERATORS = [
-  { value: "equals", label: "Equals" },
-  { value: "not_equals", label: "Does not equal" },
-  { value: "contains", label: "Contains" },
-  { value: "not_contains", label: "Does not contain" },
-  { value: "starts_with", label: "Starts with" },
-  { value: "ends_with", label: "Ends with" },
-  { value: "is_null", label: "Is empty" },
-  { value: "is_not_null", label: "Is not empty" },
-];
-
-const NUMERIC_OPERATORS = [
-  { value: "equals", label: "=" },
-  { value: "not_equals", label: "!=" },
-  { value: "greater_than", label: ">" },
-  { value: "greater_than_or_equal", label: ">=" },
-  { value: "less_than", label: "<" },
-  { value: "less_than_or_equal", label: "<=" },
-  { value: "is_null", label: "Is empty" },
-  { value: "is_not_null", label: "Is not empty" },
-];
 
 function isNumericDtype(dtype: string): boolean {
   return (
@@ -63,7 +54,7 @@ export function FilterPopover({
   const isNumeric = isNumericDtype(dtype);
   const operators = isNumeric ? NUMERIC_OPERATORS : TEXT_OPERATORS;
 
-  const [operator, setOperator] = useState(operators[0].value);
+  const [operator, setOperator] = useState<string>(operators[0].value);
   const [value, setValue] = useState("");
   const popoverRef = useRef<HTMLDivElement>(null);
 

@@ -1,8 +1,20 @@
+/**
+ * TableList — sidebar panel listing all persistent DuckDB tables in the open project.
+ *
+ * Only renders when `visible` is true and `tables` is non-empty. Clicking a table
+ * name triggers `onSelectTable`; the × button triggers `onRemoveTable` (drops the
+ * table from DuckDB after confirmation is handled by the parent).
+ */
 interface TableListProps {
+  /** Names of all persistent DuckDB tables in the current project. */
   tables: string[];
+  /** The name of the currently active (displayed) dataset, or null if none. */
   activeTable: string | null;
+  /** Called when the user clicks a table row to make it active. */
   onSelectTable: (name: string) => void;
+  /** Called when the user clicks the × remove button on a table row. */
   onRemoveTable: (name: string) => void;
+  /** When false, the sidebar is hidden entirely. */
   visible: boolean;
 }
 

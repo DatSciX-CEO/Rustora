@@ -26,7 +26,18 @@ interface ChartPanelProps {
   onClose: () => void;
 }
 
+/**
+ * ChartPanel — floating overlay for building bar, line, and pie charts.
+ *
+ * Aggregates the active dataset via the `aggregate_for_chart` Tauri command,
+ * which runs a GROUP BY query in DuckDB. Results are rendered with Recharts.
+ * The panel is dismissed by clicking the overlay backdrop or the × button.
+ */
+
 type ChartType = "bar" | "line" | "pie";
+
+/** All supported chart types. Used for rendering the chart type picker buttons. */
+const CHART_TYPES: ChartType[] = ["bar", "line", "pie"];
 
 const AGG_TYPES = [
   { value: "count", label: "Count" },
@@ -36,6 +47,15 @@ const AGG_TYPES = [
   { value: "max", label: "Max" },
 ];
 
+/**
+ * Chart color palette.
+ * Colors mirror the app's CSS custom properties where applicable:
+ *   [0] = --accent (#c45a2c, rust-copper primary)
+ *   [1] = --blue   (#3a7cbf, steel-blue secondary)
+ *   [2] = --success (#3a8a5c)
+ *   [3] = --warning (#b8860b)
+ * Remaining entries provide additional variety for multi-series charts.
+ */
 const CHART_COLORS = [
   "#c45a2c",
   "#3a7cbf",
@@ -101,7 +121,7 @@ export function ChartPanel({
             <div className="chart-config-section">
               <label className="chart-config-label">Chart Type</label>
               <div className="chart-type-picker">
-                {(["bar", "line", "pie"] as ChartType[]).map((t) => (
+                {CHART_TYPES.map((t) => (
                   <button
                     key={t}
                     className={`chart-type-btn ${chartType === t ? "active" : ""}`}
