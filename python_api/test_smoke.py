@@ -69,6 +69,8 @@ def main():
         session.remove_dataset("test_data")
         print("[OK] Dataset removed")
 
+        del session
+
     print("\n=== All smoke tests passed! ===")
 
 
