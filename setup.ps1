@@ -20,9 +20,13 @@ $ErrorActionPreference = "Stop"
 function Assert-Command($Name) {
     if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) {
         Write-Host "ERROR: '$Name' is not installed or not on PATH." -ForegroundColor Red
+        Write-Host "`nPress any key to exit..." -ForegroundColor DarkGray
+        $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
         exit 1
     }
 }
+
+try {
 
 Write-Host "`n=== Rustora Setup ===" -ForegroundColor Cyan
 
@@ -39,7 +43,6 @@ Write-Host "  npm    : $(npm --version)"
 
 Push-Location "$PSScriptRoot\desktop_ui"
 
-try {
     if (-not (Test-Path "node_modules")) {
         Write-Host "`nInstalling frontend dependencies..." -ForegroundColor Yellow
         npm install
@@ -71,6 +74,12 @@ try {
         Write-Host "  (First launch compiles the Rust backend — this may take several minutes)" -ForegroundColor DarkYellow
         npm run tauri dev
     }
+
+} catch {
+    Write-Host "`nSETUP FAILED: $_" -ForegroundColor Red
+    Write-Host $_.ScriptStackTrace -ForegroundColor DarkRed
+    Write-Host "`nPress any key to exit..." -ForegroundColor DarkGray
+    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
 } finally {
     Pop-Location
 }
