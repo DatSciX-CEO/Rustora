@@ -220,16 +220,39 @@ The build process will produce:
 
 > **Note:** The `target` directory is excluded from version control (git-ignored). When cloning this repository on a new machine, you **must run the build command** to generate the executable.
 
-### Alternative: Using Cargo Instead of npm
+### Build Without npm (Cargo-Only)
 
-If you can't use `npm`, you can install the Tauri CLI via Cargo and use an alternative package manager for front-end dependencies:
+If your environment doesn't have npm/Node.js, you can build the release `.exe` using **only Rust and Cargo**. The repository includes a pre-built frontend (`desktop_ui/dist/`) so no JavaScript tooling is required.
+
+```powershell
+# One command — builds Rustora.exe + MSI installer
+.\build_no_npm.ps1
+```
+
+Or manually:
+
+```bash
+# 1. Install the Tauri CLI (one-time)
+cargo install tauri-cli
+
+# 2. Build using the standalone config (skips npm, uses pre-built frontend)
+cd desktop_ui
+cargo tauri build --config src-tauri/tauri.standalone.conf.json
+```
+
+The standalone config tells Tauri to use the committed `dist/` folder directly instead of invoking npm. The resulting `.exe` bundles the frontend into the binary — **no localhost, no dev server, no Node.js needed at runtime**.
+
+> **Requirements:** Rust (stable) and C++ Build Tools. Node.js is **not** needed.
+
+### Alternative: Using a Different JS Package Manager
+
+If you want the full dev workflow but prefer an npm alternative:
 
 ```bash
 # 1. Install the Tauri CLI (one-time)
 cargo install tauri-cli
 
 # 2. Install frontend dependencies with an npm alternative:
-#    Pick ONE of the following:
 cd desktop_ui
 yarn install        # https://yarnpkg.com
 pnpm install        # https://pnpm.io
@@ -242,16 +265,15 @@ cargo tauri dev
 cargo tauri build
 ```
 
-> **Note:** The React frontend requires a JavaScript package manager for the initial dependency install. After that one-time setup, you can use `cargo tauri dev` and `cargo tauri build` exclusively — no further npm usage required.
-
 ### Troubleshooting
 
 | Symptom | Cause | Fix |
 |:---|:---|:---|
-| `localhost refused to connect` | Vite dev server didn't start (missing `node_modules`) | Run `npm install` inside `desktop_ui/` first |
+| `localhost refused to connect` | Vite dev server didn't start (missing `node_modules`) | Use `.\build_no_npm.ps1` for cargo-only builds, or run `npm install` inside `desktop_ui/` for dev mode |
 | `npm install` at repo root does nothing | There is no `package.json` at the root — this is a Rust workspace | `cd desktop_ui` then `npm install` |
-| Build fails with missing icons | Icons directory not generated | Run `npx tauri icon <source.png>` inside `desktop_ui/` |
+| Build fails with missing icons | Icons directory not generated | Icons are committed to the repo; if missing, run `npx tauri icon <source.png>` inside `desktop_ui/` |
 | Link errors on Windows | Missing C++ build tools | Install VS Build Tools with "Desktop development with C++" workload |
+| Exe shows blank window | Frontend not bundled | Use `.\build_no_npm.ps1` or ensure `desktop_ui/dist/` exists before `cargo tauri build` |
 
 ### Run Tests
 

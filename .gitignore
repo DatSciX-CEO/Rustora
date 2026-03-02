@@ -5,6 +5,7 @@ target/
 # Node
 node_modules/
 dist/
+!desktop_ui/dist/
 
 # OS
 .DS_Store
