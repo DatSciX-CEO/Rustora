@@ -172,14 +172,26 @@ CSV / Parquet / Arrow file
 |:---|:---|:---|
 | **Rust** | stable | [rustup.rs](https://www.rust-lang.org/tools/install) |
 | **Node.js** | 18+ | [nodejs.org](https://nodejs.org/) |
-| **C++ Build Tools** | — | Windows: VS Build Tools · macOS: Xcode CLI · Linux: `build-essential` |
+| **C++ Build Tools** | — | Windows: VS Build Tools ("Desktop development with C++" workload) · macOS: Xcode CLI · Linux: `build-essential` |
 | **Tauri Dependencies** | — | [Tauri v2 Prerequisites](https://v2.tauri.app/start/prerequisites/) |
 
-### Install & Run
+### Quick Start (Windows)
+
+The fastest way to get up and running:
+
+```powershell
+git clone https://github.com/protoxx/rustora.git
+cd rustora
+.\setup.ps1
+```
+
+The `setup.ps1` script checks prerequisites, installs dependencies, and launches the app. Pass `-Build` to produce a release `.exe` instead of starting the dev server.
+
+### Manual Install & Run
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/rustora.git
+git clone https://github.com/protoxx/rustora.git
 cd rustora
 
 # Install frontend dependencies
@@ -191,15 +203,14 @@ npm install
 npm run tauri dev
 ```
 
+> **First launch note:** The initial build compiles the entire Rust backend including DuckDB (C++ source) and Polars. This can take **10–15 minutes** depending on your machine. Subsequent launches are fast thanks to incremental compilation.
+
 ### Build for Release
 
 To create the optimized `Rustora.exe` executable:
 
 ```bash
-# Make sure you are in the desktop_ui directory
 cd desktop_ui
-
-# Build the release binary
 npm run tauri build
 ```
 
@@ -232,6 +243,15 @@ cargo tauri build
 ```
 
 > **Note:** The React frontend requires a JavaScript package manager for the initial dependency install. After that one-time setup, you can use `cargo tauri dev` and `cargo tauri build` exclusively — no further npm usage required.
+
+### Troubleshooting
+
+| Symptom | Cause | Fix |
+|:---|:---|:---|
+| `localhost refused to connect` | Vite dev server didn't start (missing `node_modules`) | Run `npm install` inside `desktop_ui/` first |
+| `npm install` at repo root does nothing | There is no `package.json` at the root — this is a Rust workspace | `cd desktop_ui` then `npm install` |
+| Build fails with missing icons | Icons directory not generated | Run `npx tauri icon <source.png>` inside `desktop_ui/` |
+| Link errors on Windows | Missing C++ build tools | Install VS Build Tools with "Desktop development with C++" workload |
 
 ### Run Tests
 
