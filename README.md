@@ -171,7 +171,7 @@ CSV / Parquet / Arrow file
 | Requirement | Version | Install |
 |:---|:---|:---|
 | **Rust** | stable | [rustup.rs](https://www.rust-lang.org/tools/install) |
-| **Node.js** | 18+ | [nodejs.org](https://nodejs.org/) |
+| **Node.js** | 18+ (optional) | [nodejs.org](https://nodejs.org/) |
 | **C++ Build Tools** | — | Windows: VS Build Tools ("Desktop development with C++" workload) · macOS: Xcode CLI · Linux: `build-essential` |
 | **Tauri Dependencies** | — | [Tauri v2 Prerequisites](https://v2.tauri.app/start/prerequisites/) |
 
@@ -185,7 +185,10 @@ cd rustora
 .\setup.ps1
 ```
 
-The `setup.ps1` script checks prerequisites, installs dependencies, and launches the app. Pass `-Build` to produce a release `.exe` instead of starting the dev server.
+The `setup.ps1` script now supports both workflows:
+- `.\setup.ps1` for full dev mode (requires Node.js/npm).
+- `.\setup.ps1 -Build` for a release build (uses npm path when available).
+- `.\setup.ps1 -Build -NoNpm` to force cargo-only build with no npm/npx.
 
 ### Manual Install & Run
 
@@ -200,7 +203,7 @@ npm install
 
 # Launch in development mode
 # (Compiles the Rust backend + starts Vite dev server + opens the app)
-npm run tauri dev
+cargo tauri dev
 ```
 
 > **First launch note:** The initial build compiles the entire Rust backend including DuckDB (C++ source) and Polars. This can take **10–15 minutes** depending on your machine. Subsequent launches are fast thanks to incremental compilation.
@@ -211,7 +214,7 @@ To create the optimized `Rustora.exe` executable:
 
 ```bash
 cd desktop_ui
-npm run tauri build
+cargo tauri build
 ```
 
 The build process will produce:
@@ -220,13 +223,16 @@ The build process will produce:
 
 > **Note:** The `target` directory is excluded from version control (git-ignored). When cloning this repository on a new machine, you **must run the build command** to generate the executable.
 
-### Build Without npm (Cargo-Only)
+### Build Without npm/npx (Cargo-Only)
 
-If your environment doesn't have npm/Node.js, you can build the release `.exe` using **only Rust and Cargo**. The repository includes a pre-built frontend (`desktop_ui/dist/`) so no JavaScript tooling is required.
+If your environment does not allow npm/npx, you can build the release `.exe` using **only Rust and Cargo**. The repository includes a pre-built frontend (`desktop_ui/dist/`) so no JavaScript tooling is required.
 
 ```powershell
 # One command — builds Rustora.exe + MSI installer
 .\build_no_npm.ps1
+
+# Or via setup with explicit cargo-only mode
+.\setup.ps1 -Build -NoNpm
 ```
 
 Or manually:

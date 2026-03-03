@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Build Rustora using only Cargo — no npm/npx/Node.js required.
+    Build Rustora using only Cargo - no npm/npx/Node.js required.
 
 .DESCRIPTION
     Uses the pre-built frontend (desktop_ui/dist/) and a standalone Tauri
@@ -28,9 +28,24 @@ function Assert-Command($Name) {
     }
 }
 
+function Wait-IfInteractive {
+    if (-not [Environment]::UserInteractive) {
+        return
+    }
+    if ($env:CI -eq "true") {
+        return
+    }
+    try {
+        Write-Host "`nPress any key to exit..." -ForegroundColor DarkGray
+        $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+    } catch {
+        # Ignore pause failures in non-interactive shells.
+    }
+}
+
 try {
 
-Write-Host "`n=== Rustora — Cargo-Only Build ===" -ForegroundColor Cyan
+Write-Host "`n=== Rustora - Cargo-Only Build ===" -ForegroundColor Cyan
 
 Write-Host "`nChecking prerequisites..."
 Assert-Command "rustc"
@@ -43,8 +58,7 @@ if (-not (Test-Path $distPath)) {
     Write-Host "ERROR: Pre-built frontend not found at desktop_ui\dist\." -ForegroundColor Red
     Write-Host "       The dist/ folder must be present in the repo for cargo-only builds." -ForegroundColor Red
     Write-Host "       Pull the latest from git, or run 'cd desktop_ui && npm run build' once." -ForegroundColor Yellow
-    Write-Host "`nPress any key to exit..." -ForegroundColor DarkGray
-    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+    Wait-IfInteractive
     exit 1
 }
 Write-Host "  Frontend dist/ found." -ForegroundColor Green
@@ -60,7 +74,7 @@ $confPath = "src-tauri\tauri.standalone.conf.json"
 
 if ($Debug) {
     Write-Host "`nBuilding debug binary..." -ForegroundColor Yellow
-    Write-Host "  (First build may take 10-15 minutes — DuckDB compiles from C++ source)" -ForegroundColor DarkYellow
+    Write-Host "  (First build may take 10-15 minutes - DuckDB compiles from C++ source)" -ForegroundColor DarkYellow
     Push-Location "$PSScriptRoot\desktop_ui"
     try {
         cargo tauri build --debug --config $confPath
@@ -71,7 +85,7 @@ if ($Debug) {
     Write-Host "  Executable: target\debug\Rustora.exe"
 } else {
     Write-Host "`nBuilding release binary..." -ForegroundColor Yellow
-    Write-Host "  (First build may take 10-15 minutes — DuckDB compiles from C++ source)" -ForegroundColor DarkYellow
+    Write-Host "  (First build may take 10-15 minutes - DuckDB compiles from C++ source)" -ForegroundColor DarkYellow
     Push-Location "$PSScriptRoot\desktop_ui"
     try {
         cargo tauri build --config $confPath
@@ -87,6 +101,5 @@ if ($Debug) {
     Write-Host "`nBUILD FAILED: $_" -ForegroundColor Red
     Write-Host $_.ScriptStackTrace -ForegroundColor DarkRed
 } finally {
-    Write-Host "`nPress any key to exit..." -ForegroundColor DarkGray
-    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+    Wait-IfInteractive
 }
