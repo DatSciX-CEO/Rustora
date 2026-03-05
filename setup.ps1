@@ -1,21 +1,25 @@
 <#
 .SYNOPSIS
-    Bootstrap script for Rustora with npm and non-npm paths.
+    Bootstrap script for Rustora with npm, cargo-only, and egui paths.
 
 .DESCRIPTION
-    Supports two workflows:
+    Supports three workflows:
     - Full dev workflow with Node.js/npm (installs frontend deps, starts dev).
-    - Cargo-only build workflow (no npm/npx required) for restricted environments.
+    - Cargo-only Tauri build (no npm/npx required) for restricted environments.
+    - Native egui build (no npm, no Tauri, no webview) for maximum portability.
 
 .EXAMPLE
     .\setup.ps1                 # Full setup + launch dev server
     .\setup.ps1 -Build          # Full setup + produce release .exe / MSI
-    .\setup.ps1 -Build -NoNpm   # Force cargo-only build path
+    .\setup.ps1 -Build -NoNpm   # Force cargo-only Tauri build
+    .\setup.ps1 -Build -Egui    # Native egui build (no web dependencies)
+    .\setup.ps1 -Egui           # Native egui build (shorthand)
 #>
 
 param(
     [switch]$Build,
-    [switch]$NoNpm
+    [switch]$NoNpm,
+    [switch]$Egui
 )
 
 $ErrorActionPreference = "Stop"
@@ -67,9 +71,22 @@ try {
         Write-Host "  npm    : not found" -ForegroundColor DarkYellow
     }
 
+    # Egui path: pure Rust, no Tauri, no webview
+    if ($Egui) {
+        Write-Host "`nUsing native egui build path (no web dependencies)." -ForegroundColor Yellow
+        $eguiBuildScript = Join-Path $PSScriptRoot "build_egui.ps1"
+        if (-not (Test-Path $eguiBuildScript)) {
+            throw "Missing build_egui.ps1 at repo root."
+        }
+
+        & $eguiBuildScript
+        if ($LASTEXITCODE -ne 0) { throw "egui build failed" }
+        exit 0
+    }
+
     if ($useNoNpmPath) {
         if (-not $Build) {
-            throw "Node.js/npm are unavailable (or -NoNpm was set). Dev mode requires npm. Use '.\setup.ps1 -Build -NoNpm' (or '.\build_no_npm.ps1') to build without npm/npx."
+            throw "Node.js/npm are unavailable (or -NoNpm was set). Dev mode requires npm. Use '.\setup.ps1 -Build -NoNpm' (or '.\build_no_npm.ps1') to build without npm/npx, or '.\setup.ps1 -Egui' for the native egui build."
         }
 
         Write-Host "`nUsing cargo-only build path (no npm/npx)." -ForegroundColor Yellow

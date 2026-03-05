@@ -1,6 +1,7 @@
 use crate::error::{Result, RustoraError};
 use crate::filter::FilterSpec;
-use crate::storage::DuckStorage;
+use crate::storage::{CsvImportOptions, DuckStorage};
+use crate::transform_history::{StepEntry, TransformHistory, TransformStep};
 use polars::prelude::*;
 use std::collections::HashMap;
 use std::io::Cursor;
@@ -37,16 +38,22 @@ pub struct RustoraSession {
     transient: HashMap<String, LazyFrame>,
     /// Monotonically increasing counter for generating unique dataset names.
     counter: Arc<AtomicU64>,
+    /// Transform history per dataset (keyed by result table name).
+    histories: HashMap<String, TransformHistory>,
 }
 
 impl RustoraSession {
     /// Create a session with an in-memory DuckDB database (scratch mode).
     pub fn new() -> Self {
         let storage = DuckStorage::open_in_memory().ok();
+        if let Some(ref s) = storage {
+            let _ = s.ensure_steps_table();
+        }
         Self {
             storage,
             transient: HashMap::new(),
             counter: Arc::new(AtomicU64::new(0)),
+            histories: HashMap::new(),
         }
     }
 
@@ -55,18 +62,23 @@ impl RustoraSession {
     pub fn open_project(&mut self, db_path: &str) -> Result<Vec<String>> {
         info!(db_path, "opening project");
         let storage = DuckStorage::open(db_path)?;
+        let _ = storage.ensure_steps_table();
         let tables = storage.list_tables()?;
         info!(db_path, table_count = tables.len(), "project opened");
         self.storage = Some(storage);
         self.transient.clear();
+        self.histories.clear();
+        self.load_histories_from_storage();
         Ok(tables)
     }
 
     /// Create a new project file (.duckdb).
     pub fn new_project(&mut self, db_path: &str) -> Result<()> {
         let storage = DuckStorage::open(db_path)?;
+        let _ = storage.ensure_steps_table();
         self.storage = Some(storage);
         self.transient.clear();
+        self.histories.clear();
         Ok(())
     }
 
@@ -93,6 +105,57 @@ impl RustoraSession {
     }
 
     // -----------------------------------------------------------------------
+    // Transform History
+    // -----------------------------------------------------------------------
+
+    fn record_step(&mut self, parent: &str, result_table: &str, step: TransformStep) {
+        let mut history = self.histories.get(parent).cloned().unwrap_or_default();
+        history.push(step, result_table.to_string());
+        if let Some(storage) = &self.storage {
+            if let Ok(json) = serde_json::to_string(history.entries()) {
+                let _ = storage.save_step_history_json(result_table, &json);
+            }
+        }
+        self.histories.insert(result_table.to_string(), history);
+    }
+
+    fn record_source_step(&mut self, table_name: &str, file_path: &str) {
+        let mut history = TransformHistory::new();
+        history.push(
+            TransformStep::Source {
+                file_path: file_path.to_string(),
+            },
+            table_name.to_string(),
+        );
+        if let Some(storage) = &self.storage {
+            if let Ok(json) = serde_json::to_string(history.entries()) {
+                let _ = storage.save_step_history_json(table_name, &json);
+            }
+        }
+        self.histories.insert(table_name.to_string(), history);
+    }
+
+    pub fn get_history(&self, name: &str) -> TransformHistory {
+        self.histories.get(name).cloned().unwrap_or_default()
+    }
+
+    fn load_histories_from_storage(&mut self) {
+        if let Some(storage) = &self.storage {
+            if let Ok(rows) = storage.load_all_step_histories() {
+                for (table_name, json) in rows {
+                    if let Ok(entries) = serde_json::from_str::<Vec<StepEntry>>(&json) {
+                        let mut history = TransformHistory::new();
+                        for entry in entries {
+                            history.push(entry.step, entry.result_table);
+                        }
+                        self.histories.insert(table_name, history);
+                    }
+                }
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // File Import (-> DuckDB persistent table)
     // -----------------------------------------------------------------------
 
@@ -108,6 +171,7 @@ impl RustoraSession {
 
         info!(file_path, table = %name, "importing file into session");
         storage.import_file(file_path, &name)?;
+        self.record_source_step(&name, file_path);
         Ok(name)
     }
 
@@ -142,6 +206,7 @@ impl RustoraSession {
 
         let name = self.generate_name(file_path);
         self.transient.insert(name.clone(), lf);
+        self.record_source_step(&name, file_path);
         Ok(name)
     }
 
@@ -279,6 +344,12 @@ impl RustoraSession {
         let result_name = format!("sql_result_{}", self.next_counter());
         info!(sql_len = sql.len(), result_table = %result_name, "executing SQL");
         storage.execute_sql_to_table(sql, &result_name)?;
+        let mut history = TransformHistory::new();
+        history.push(
+            TransformStep::Sql { query: sql.to_string() },
+            result_name.clone(),
+        );
+        self.histories.insert(result_name.clone(), history);
         Ok(result_name)
     }
 
@@ -316,6 +387,10 @@ impl RustoraSession {
                 );
                 let result_name = format!("{}_sorted", name);
                 storage.execute_sql_to_table(&sql, &result_name)?;
+                self.record_step(name, &result_name, TransformStep::Sort {
+                    columns: columns.iter().map(|c| c.to_string()).collect(),
+                    descending: descending.to_vec(),
+                });
                 return Ok(result_name);
             }
         }
@@ -327,6 +402,10 @@ impl RustoraSession {
             let sorted = lf.clone().sort(by, sort_options);
             let new_name = format!("{}_sorted", name);
             self.transient.insert(new_name.clone(), sorted);
+            self.record_step(name, &new_name, TransformStep::Sort {
+                columns: columns.iter().map(|c| c.to_string()).collect(),
+                descending: descending.to_vec(),
+            });
             return Ok(new_name);
         }
 
@@ -362,6 +441,9 @@ impl RustoraSession {
                 );
                 let result_name = format!("{}_filtered_{}", name, self.next_counter());
                 storage.execute_sql_to_table(&sql, &result_name)?;
+                self.record_step(name, &result_name, TransformStep::Filter {
+                    where_clause: where_clause.to_string(),
+                });
                 return Ok(result_name);
             }
         }
@@ -408,6 +490,10 @@ impl RustoraSession {
 
                 let result_name = format!("{}_grouped_{}", name, self.next_counter());
                 storage.execute_sql_to_table(&sql, &result_name)?;
+                self.record_step(name, &result_name, TransformStep::GroupBy {
+                    group_columns: group_columns.iter().map(|c| c.to_string()).collect(),
+                    agg_exprs: agg_exprs.iter().map(|e| e.to_string()).collect(),
+                });
                 return Ok(result_name);
             }
         }
@@ -431,6 +517,10 @@ impl RustoraSession {
                 );
                 let result_name = format!("{}_calc_{}", name, self.next_counter());
                 storage.execute_sql_to_table(&sql, &result_name)?;
+                self.record_step(name, &result_name, TransformStep::AddColumn {
+                    expression: expr.to_string(),
+                    alias: alias.to_string(),
+                });
                 return Ok(result_name);
             }
         }
@@ -452,6 +542,335 @@ impl RustoraSession {
         Err(RustoraError::Session(
             "Summary statistics require an active project. Please create or open a project first.".to_string()
         ))
+    }
+
+    // -----------------------------------------------------------------------
+    // Column Operations
+    // -----------------------------------------------------------------------
+
+    pub fn remove_columns(&mut self, name: &str, columns: &[&str]) -> Result<String> {
+        if let Some(storage) = &self.storage {
+            if storage.list_tables()?.contains(&name.to_string()) {
+                let info = storage.table_info(name)?;
+                let keep: Vec<String> = info
+                    .column_names
+                    .iter()
+                    .filter(|c| !columns.contains(&c.as_str()))
+                    .map(|c| format!("\"{}\"", c))
+                    .collect();
+                if keep.is_empty() {
+                    return Err(RustoraError::Session(
+                        "Cannot remove all columns".to_string(),
+                    ));
+                }
+                let sql = format!("SELECT {} FROM \"{}\"", keep.join(", "), name);
+                let result_name = format!("{}_cols_{}", name, self.next_counter());
+                storage.execute_sql_to_table(&sql, &result_name)?;
+                self.record_step(
+                    name,
+                    &result_name,
+                    TransformStep::RemoveColumns {
+                        columns: columns.iter().map(|c| c.to_string()).collect(),
+                    },
+                );
+                return Ok(result_name);
+            }
+        }
+        Err(RustoraError::TableNotFound(name.to_string()))
+    }
+
+    pub fn keep_columns(&mut self, name: &str, columns: &[&str]) -> Result<String> {
+        if let Some(storage) = &self.storage {
+            if storage.list_tables()?.contains(&name.to_string()) {
+                let keep: Vec<String> =
+                    columns.iter().map(|c| format!("\"{}\"", c)).collect();
+                let sql = format!("SELECT {} FROM \"{}\"", keep.join(", "), name);
+                let result_name = format!("{}_kept_{}", name, self.next_counter());
+                storage.execute_sql_to_table(&sql, &result_name)?;
+                self.record_step(
+                    name,
+                    &result_name,
+                    TransformStep::KeepColumns {
+                        columns: columns.iter().map(|c| c.to_string()).collect(),
+                    },
+                );
+                return Ok(result_name);
+            }
+        }
+        Err(RustoraError::TableNotFound(name.to_string()))
+    }
+
+    pub fn change_column_type(
+        &mut self,
+        name: &str,
+        column: &str,
+        new_type: &str,
+    ) -> Result<String> {
+        if let Some(storage) = &self.storage {
+            if storage.list_tables()?.contains(&name.to_string()) {
+                let info = storage.table_info(name)?;
+                let select_exprs: Vec<String> = info
+                    .column_names
+                    .iter()
+                    .map(|c| {
+                        if c == column {
+                            format!("CAST(\"{}\" AS {}) AS \"{}\"", c, new_type, c)
+                        } else {
+                            format!("\"{}\"", c)
+                        }
+                    })
+                    .collect();
+                let sql =
+                    format!("SELECT {} FROM \"{}\"", select_exprs.join(", "), name);
+                let result_name = format!("{}_typed_{}", name, self.next_counter());
+                storage.execute_sql_to_table(&sql, &result_name)?;
+                self.record_step(
+                    name,
+                    &result_name,
+                    TransformStep::ChangeType {
+                        column: column.to_string(),
+                        new_type: new_type.to_string(),
+                    },
+                );
+                return Ok(result_name);
+            }
+        }
+        Err(RustoraError::TableNotFound(name.to_string()))
+    }
+
+    pub fn rename_column(
+        &mut self,
+        name: &str,
+        old_col: &str,
+        new_col: &str,
+    ) -> Result<String> {
+        if let Some(storage) = &self.storage {
+            if storage.list_tables()?.contains(&name.to_string()) {
+                let info = storage.table_info(name)?;
+                let select_exprs: Vec<String> = info
+                    .column_names
+                    .iter()
+                    .map(|c| {
+                        if c == old_col {
+                            format!("\"{}\" AS \"{}\"", c, new_col)
+                        } else {
+                            format!("\"{}\"", c)
+                        }
+                    })
+                    .collect();
+                let sql = format!("SELECT {} FROM \"{}\"", select_exprs.join(", "), name);
+                let result_name = format!("{}_renamed_{}", name, self.next_counter());
+                storage.execute_sql_to_table(&sql, &result_name)?;
+                self.record_step(
+                    name,
+                    &result_name,
+                    TransformStep::RenameColumn {
+                        old_name: old_col.to_string(),
+                        new_name: new_col.to_string(),
+                    },
+                );
+                return Ok(result_name);
+            }
+        }
+        Err(RustoraError::TableNotFound(name.to_string()))
+    }
+
+    // -----------------------------------------------------------------------
+    // Pivot / Unpivot
+    // -----------------------------------------------------------------------
+
+    pub fn pivot_dataset(
+        &mut self,
+        name: &str,
+        index_cols: &[&str],
+        pivot_col: &str,
+        value_col: &str,
+        agg: &str,
+    ) -> Result<String> {
+        let storage = self.storage.as_ref().ok_or(RustoraError::NoProjectOpen)?;
+        if !storage.list_tables()?.contains(&name.to_string()) {
+            return Err(RustoraError::TableNotFound(name.to_string()));
+        }
+        let idx = index_cols
+            .iter()
+            .map(|c| format!("\"{}\"", c))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "PIVOT \"{}\" ON \"{}\" USING {}(\"{}\") GROUP BY {}",
+            name,
+            pivot_col,
+            agg.to_uppercase(),
+            value_col,
+            idx
+        );
+        let result_name = format!("{}_pivot_{}", name, self.next_counter());
+        storage.execute_sql_to_table(&sql, &result_name)?;
+        self.record_step(
+            name,
+            &result_name,
+            TransformStep::Pivot {
+                index_cols: index_cols.iter().map(|c| c.to_string()).collect(),
+                pivot_col: pivot_col.to_string(),
+                value_col: value_col.to_string(),
+                agg: agg.to_string(),
+            },
+        );
+        Ok(result_name)
+    }
+
+    pub fn unpivot_dataset(
+        &mut self,
+        name: &str,
+        value_cols: &[&str],
+        var_name: &str,
+        value_name: &str,
+    ) -> Result<String> {
+        let storage = self.storage.as_ref().ok_or(RustoraError::NoProjectOpen)?;
+        if !storage.list_tables()?.contains(&name.to_string()) {
+            return Err(RustoraError::TableNotFound(name.to_string()));
+        }
+        let val_cols = value_cols
+            .iter()
+            .map(|c| format!("\"{}\"", c))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "UNPIVOT \"{}\" ON {} INTO NAME \"{}\" VALUE \"{}\"",
+            name, val_cols, var_name, value_name
+        );
+        let result_name = format!("{}_unpivot_{}", name, self.next_counter());
+        storage.execute_sql_to_table(&sql, &result_name)?;
+        self.record_step(
+            name,
+            &result_name,
+            TransformStep::Unpivot {
+                id_cols: vec![],
+                value_cols: value_cols.iter().map(|c| c.to_string()).collect(),
+                var_name: var_name.to_string(),
+                value_name: value_name.to_string(),
+            },
+        );
+        Ok(result_name)
+    }
+
+    // -----------------------------------------------------------------------
+    // Merge / Append
+    // -----------------------------------------------------------------------
+
+    pub fn merge_datasets(
+        &mut self,
+        left: &str,
+        right: &str,
+        left_col: &str,
+        right_col: &str,
+        join_type: &str,
+    ) -> Result<String> {
+        let storage = self.storage.as_ref().ok_or(RustoraError::NoProjectOpen)?;
+        let join_keyword = match join_type {
+            "inner" => "INNER JOIN",
+            "left" => "LEFT JOIN",
+            "right" => "RIGHT JOIN",
+            "full" => "FULL OUTER JOIN",
+            _ => "INNER JOIN",
+        };
+        let sql = format!(
+            "SELECT * FROM \"{}\" {} \"{}\" ON \"{}\".\"{}\" = \"{}\".\"{}\"",
+            left, join_keyword, right, left, left_col, right, right_col
+        );
+        let result_name = format!("merged_{}", self.next_counter());
+        storage.execute_sql_to_table(&sql, &result_name)?;
+        self.record_step(
+            left,
+            &result_name,
+            TransformStep::Merge {
+                right_table: right.to_string(),
+                left_col: left_col.to_string(),
+                right_col: right_col.to_string(),
+                join_type: join_type.to_string(),
+            },
+        );
+        Ok(result_name)
+    }
+
+    pub fn append_datasets(&mut self, tables: &[&str]) -> Result<String> {
+        let storage = self.storage.as_ref().ok_or(RustoraError::NoProjectOpen)?;
+        if tables.is_empty() {
+            return Err(RustoraError::Session(
+                "No tables to append".to_string(),
+            ));
+        }
+        let unions: Vec<String> = tables
+            .iter()
+            .map(|t| format!("SELECT * FROM \"{}\"", t))
+            .collect();
+        let sql = unions.join(" UNION ALL ");
+        let result_name = format!("appended_{}", self.next_counter());
+        storage.execute_sql_to_table(&sql, &result_name)?;
+        self.record_step(
+            tables[0],
+            &result_name,
+            TransformStep::Append {
+                tables: tables.iter().map(|t| t.to_string()).collect(),
+            },
+        );
+        Ok(result_name)
+    }
+
+    // -----------------------------------------------------------------------
+    // Preview / Import with Options
+    // -----------------------------------------------------------------------
+
+    pub fn preview_file(
+        &self,
+        file_path: &str,
+        delimiter: u8,
+        has_header: bool,
+        skip_rows: u32,
+        limit: u32,
+    ) -> Result<Vec<u8>> {
+        let storage = self.storage.as_ref().ok_or(RustoraError::NoProjectOpen)?;
+        let options = CsvImportOptions {
+            delimiter,
+            has_header,
+            skip_rows,
+        };
+        storage.preview_file(file_path, &options, limit as u64)
+    }
+
+    pub fn import_file_with_options(
+        &mut self,
+        file_path: &str,
+        table_name: Option<&str>,
+        delimiter: u8,
+        has_header: bool,
+        skip_rows: u32,
+    ) -> Result<String> {
+        let storage = self.storage.as_ref().ok_or(RustoraError::NoProjectOpen)?;
+        let name = match table_name {
+            Some(n) if !n.is_empty() => n.to_string(),
+            _ => self.generate_name(file_path),
+        };
+        let ext = Path::new(file_path)
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+        match ext.as_str() {
+            "csv" | "tsv" => {
+                let options = CsvImportOptions {
+                    delimiter,
+                    has_header,
+                    skip_rows,
+                };
+                storage.import_csv_with_options(file_path, &name, &options)?;
+            }
+            _ => {
+                storage.import_file(file_path, &name)?;
+            }
+        };
+        self.record_source_step(&name, file_path);
+        Ok(name)
     }
 
     // -----------------------------------------------------------------------

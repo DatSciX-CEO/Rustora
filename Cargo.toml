@@ -1,5 +1,5 @@
 [workspace]
-members = ["core_engine", "desktop_ui/src-tauri", "python_api"]
+members = ["core_engine", "desktop_ui/src-tauri", "desktop_egui", "python_api"]
 resolver = "2"
 # Minimum Supported Rust Version: 1.75.0 (required for Polars 0.46 + DuckDB 1.4)
 
@@ -23,5 +23,6 @@ duckdb = { version = "1.4", features = ["bundled"] }
 anyhow = "1.0"
 thiserror = "2.0"
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

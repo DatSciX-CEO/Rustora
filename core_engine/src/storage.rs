@@ -14,6 +14,24 @@ pub struct TableInfo {
     pub row_count: usize,
 }
 
+/// Options for CSV import with configurable delimiter, header, and skip rows.
+#[derive(Debug, Clone)]
+pub struct CsvImportOptions {
+    pub delimiter: u8,
+    pub has_header: bool,
+    pub skip_rows: u32,
+}
+
+impl Default for CsvImportOptions {
+    fn default() -> Self {
+        Self {
+            delimiter: b',',
+            has_header: true,
+            skip_rows: 0,
+        }
+    }
+}
+
 /// Persistent storage layer backed by DuckDB.
 /// Handles file import, SQL execution, and Arrow IPC serialization.
 pub struct DuckStorage {
@@ -191,7 +209,7 @@ impl DuckStorage {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main' ORDER BY table_name",
+                "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main' AND table_name NOT LIKE '_rustora_%' ORDER BY table_name",
             )
             .map_err(|e| RustoraError::DuckDb(e.to_string()))?;
 
@@ -299,6 +317,125 @@ impl DuckStorage {
             .execute_batch(&create_sql)
             .map_err(|e| RustoraError::DuckDb(e.to_string()))?;
         Ok(safe_name)
+    }
+
+    // -----------------------------------------------------------------------
+    // CSV Import with Options
+    // -----------------------------------------------------------------------
+
+    pub fn import_csv_with_options(
+        &self,
+        file_path: &str,
+        table_name: &str,
+        options: &CsvImportOptions,
+    ) -> Result<()> {
+        let escaped_path = file_path.replace('\'', "''");
+        let delim_char = options.delimiter as char;
+        let header_str = if options.has_header { "true" } else { "false" };
+        let skip = options.skip_rows;
+        let sql = format!(
+            "CREATE OR REPLACE TABLE \"{}\" AS SELECT * FROM read_csv('{}', delim='{}', header={}, skip={})",
+            table_name, escaped_path, delim_char, header_str, skip
+        );
+        self.conn
+            .execute_batch(&sql)
+            .map_err(|e| RustoraError::DuckDb(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Preview a file's contents without importing. Returns Arrow IPC bytes.
+    pub fn preview_file(
+        &self,
+        file_path: &str,
+        options: &CsvImportOptions,
+        limit: u64,
+    ) -> Result<Vec<u8>> {
+        let escaped_path = file_path.replace('\'', "''");
+        let ext = Path::new(file_path)
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+
+        let sql = match ext.as_str() {
+            "csv" | "tsv" => {
+                let delim_char = options.delimiter as char;
+                let header_str = if options.has_header { "true" } else { "false" };
+                let skip = options.skip_rows;
+                format!(
+                    "SELECT * FROM read_csv('{}', delim='{}', header={}, skip={}) LIMIT {}",
+                    escaped_path, delim_char, header_str, skip, limit
+                )
+            }
+            "parquet" | "pq" => {
+                format!(
+                    "SELECT * FROM read_parquet('{}') LIMIT {}",
+                    escaped_path, limit
+                )
+            }
+            _ => {
+                format!("SELECT * FROM '{}' LIMIT {}", escaped_path, limit)
+            }
+        };
+        self.query_to_ipc(&sql)
+    }
+
+    // -----------------------------------------------------------------------
+    // Transform Step Persistence
+    // -----------------------------------------------------------------------
+
+    pub fn ensure_steps_table(&self) -> Result<()> {
+        self.conn
+            .execute_batch(
+                "CREATE TABLE IF NOT EXISTS _rustora_steps (
+                    table_name TEXT PRIMARY KEY,
+                    steps_json TEXT NOT NULL
+                )",
+            )
+            .map_err(|e| RustoraError::DuckDb(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn save_step_history_json(&self, table_name: &str, json: &str) -> Result<()> {
+        let escaped_name = table_name.replace('\'', "''");
+        let escaped_json = json.replace('\'', "''");
+        self.conn
+            .execute_batch(&format!(
+                "DELETE FROM _rustora_steps WHERE table_name = '{}'; \
+                 INSERT INTO _rustora_steps VALUES ('{}', '{}')",
+                escaped_name, escaped_name, escaped_json
+            ))
+            .map_err(|e| RustoraError::DuckDb(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn load_all_step_histories(&self) -> Result<Vec<(String, String)>> {
+        let exists: bool = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM information_schema.tables \
+                 WHERE table_schema = 'main' AND table_name = '_rustora_steps'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(false);
+
+        if !exists {
+            return Ok(vec![]);
+        }
+
+        let mut stmt = self
+            .conn
+            .prepare("SELECT table_name, steps_json FROM _rustora_steps")
+            .map_err(|e| RustoraError::DuckDb(e.to_string()))?;
+
+        let rows: Vec<(String, String)> = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .map_err(|e| RustoraError::DuckDb(e.to_string()))?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| RustoraError::DuckDb(e.to_string()))?;
+
+        Ok(rows)
     }
 
     // -----------------------------------------------------------------------

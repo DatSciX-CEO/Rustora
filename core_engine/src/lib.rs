@@ -20,8 +20,10 @@ pub mod error;
 pub mod filter;
 pub mod session;
 pub mod storage;
+pub mod transform_history;
 
 pub use error::{Result, RustoraError};
 pub use filter::{FilterCondition, FilterLogic, FilterOperator, FilterSpec};
 pub use session::RustoraSession;
-pub use storage::DuckStorage;
+pub use storage::{CsvImportOptions, DuckStorage};
+pub use transform_history::{StepEntry, TransformHistory, TransformStep};

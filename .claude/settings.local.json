@@ -1,7 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(\"C:/Rustora/dev_docs/ROADMAP.md\":*)"
-    ]
-  }
-}

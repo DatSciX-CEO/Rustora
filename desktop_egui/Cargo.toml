@@ -1,0 +1,24 @@
+[package]
+name = "desktop_egui"
+version = "0.1.0"
+description = "Rustora - Native egui desktop application"
+edition = "2021"
+
+[[bin]]
+name = "Rustora"
+path = "src/main.rs"
+
+[dependencies]
+core_engine = { path = "../core_engine" }
+eframe = { version = "0.31", default-features = true }
+egui = "0.31"
+egui_extras = { version = "0.31", features = ["image"] }
+egui_plot = "0.31"
+rfd = "0.15"
+arrow-ipc = "56"
+arrow-schema = "56"
+arrow-array = "56"
+arrow-cast = "56"
+serde = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
