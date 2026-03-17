@@ -87,8 +87,8 @@ export function useDataset() {
     try {
       const tables = await invoke<string[]>("list_datasets");
       setState((s) => ({ ...s, tables }));
-    } catch {
-      // ignore
+    } catch (e) {
+      setState((s) => ({ ...s, error: errorMessage(e) }));
     }
   }, []);
 

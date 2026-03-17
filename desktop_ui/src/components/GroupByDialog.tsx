@@ -18,7 +18,7 @@ interface GroupByDialogProps {
 
 export function GroupByDialog({ columns, onSubmit, onClose }: GroupByDialogProps) {
   const [selectedCols, setSelectedCols] = useState<Set<string>>(new Set());
-  const [aggExpr, setAggExpr] = useState("COUNT(*)");
+  const [aggExpr, setAggExpr] = useState("");
 
   const toggleCol = (name: string) => {
     setSelectedCols((prev) => {

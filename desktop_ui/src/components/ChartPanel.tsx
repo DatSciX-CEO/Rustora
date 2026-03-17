@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { parseIpcBytes, type ParsedTable } from "../lib/arrow";
 import { errorMessage } from "../lib/error";
@@ -75,8 +75,8 @@ export function ChartPanel({
   onClose,
 }: ChartPanelProps) {
   const [chartType, setChartType] = useState<ChartType>("bar");
-  const [groupCol, setGroupCol] = useState(columns[0]?.name ?? "");
-  const [valueCol, setValueCol] = useState(columns.length > 1 ? columns[1].name : "");
+  const [groupCol, setGroupCol] = useState("");
+  const [valueCol, setValueCol] = useState("");
   const [aggType, setAggType] = useState("count");
   const [limit, setLimit] = useState(20);
   const [chartData, setChartData] = useState<Record<string, unknown>[] | null>(null);
@@ -85,7 +85,29 @@ export function ChartPanel({
 
   const needsValueCol = aggType !== "count";
 
+  // When dataset or columns change, clear selections to avoid stale defaults.
+  useEffect(() => {
+    setGroupCol("");
+    setValueCol("");
+    setChartData(null);
+    setError(null);
+  }, [datasetName, columns]);
+
+  // If a previously selected column disappears, clear it.
+  useEffect(() => {
+    if (groupCol && !columns.find((c) => c.name === groupCol)) {
+      setGroupCol("");
+    }
+    if (valueCol && !columns.find((c) => c.name === valueCol)) {
+      setValueCol("");
+    }
+  }, [columns, groupCol, valueCol]);
+
   const generateChart = useCallback(async () => {
+    if (!groupCol || (needsValueCol && !valueCol)) {
+      setError("Choose required columns to generate a chart.");
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -155,6 +177,9 @@ export function ChartPanel({
                 value={groupCol}
                 onChange={(e) => setGroupCol(e.target.value)}
               >
+                <option value="" disabled>
+                  Select a column
+                </option>
                 {columns.map((c) => (
                   <option key={c.name} value={c.name}>
                     {c.name} ({c.dtype})
@@ -186,6 +211,9 @@ export function ChartPanel({
                   value={valueCol}
                   onChange={(e) => setValueCol(e.target.value)}
                 >
+                  <option value="" disabled>
+                    Select a column
+                  </option>
                   {columns.map((c) => (
                     <option key={c.name} value={c.name}>
                       {c.name} ({c.dtype})
@@ -210,7 +238,7 @@ export function ChartPanel({
             <button
               className="chart-generate-btn"
               onClick={generateChart}
-              disabled={loading || !groupCol}
+              disabled={loading || !groupCol || (needsValueCol && !valueCol)}
             >
               {loading ? "Generating..." : "Generate Chart"}
             </button>
